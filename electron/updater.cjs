@@ -33,7 +33,12 @@ function createUpdateController({ updater, mode, version, notify = () => {}, isB
       if (mode !== 'installed' || ['downloaded', 'downloading', 'installing'].includes(state.status)) return Promise.resolve(this.get());
       if (checking) return checking;
       set({ status: 'checking', message: '' });
-      checking = Promise.resolve().then(() => updater.checkForUpdates()).catch(() => {
+      checking = Promise.resolve().then(() => updater.checkForUpdates()).then(result => {
+        // checkForUpdates resolves before the automatic download finishes.
+        // Its separate promise must be handled to avoid an unhandled rejection
+        // when the network drops or the downloaded checksum is invalid.
+        result?.downloadPromise?.catch(() => set({ status:'error', percent:0, message:'업데이트 다운로드를 마치지 못했어요. 인터넷 연결을 확인하고 다시 시도해 주세요.' }));
+      }).catch(() => {
         set({ status: 'error', percent: 0, message: '업데이트를 확인하지 못했어요. 인터넷 연결을 확인하고 다시 시도해 주세요.' });
       }).finally(() => { checking = null; });
       return checking.then(() => this.get());
