@@ -27,6 +27,14 @@ Windows의 ‘동작 줄이기’가 켜져 있어도 이동을 표현하는 기
 - **대화창 X / Esc**: 대화창 접기, 캐릭터는 계속 머무르기
 - **Enter**: 전송 / **Shift+Enter**: 줄바꿈
 
+## Windows 시작 시 자동 실행
+
+캐릭터 클릭 → 설정 상단의 **Windows 시작 시 자동 실행**을 켜세요. 스위치를 바꾸면 즉시 적용되며, 다음 Windows 로그인부터 대화창 없이 캐릭터만 나타납니다. 캐릭터나 트레이의 우클릭 메뉴에서도 켜고 끌 수 있습니다. 기본값은 꺼짐입니다.
+
+설치형에서 사용할 수 있습니다. Windows 설정이나 작업 관리자에서 시작 프로그램을 해제한 상태도 반영하며, 앱을 켜거나 다른 설정을 저장하는 것만으로 강제로 다시 활성화하지 않습니다. 자동 업데이트 후에도 같은 설치 경로를 사용합니다.
+
+[Electron 공식 로그인 항목 API](https://www.electronjs.org/docs/latest/api/app#appsetloginitemsettingssettings-macos-windows)를 사용합니다. `npm run verify:startup`은 별도 임시 이름으로 실제 Windows 등록·제거를 검사하고 정리하며, 사용자 앱의 자동 실행 설정은 바꾸지 않습니다.
+
 ## Claude 연결
 
 캐릭터를 클릭하고 설정에서 개인 Claude API 키(`sk-ant-…`)를 입력해 저장합니다. 키는 Electron `safeStorage`를 통해 Windows 계정으로 암호화하여 `%APPDATA%/parkjuim-desktop/settings.json`에 저장합니다. 렌더러에 저장된 키를 돌려주지 않으며, Claude 호출은 Electron 메인 프로세스에서만 수행합니다. 키 삭제도 설정에서 할 수 있습니다.

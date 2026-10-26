@@ -8,6 +8,7 @@ const { createStore } = require('./store.cjs');
 const { createUpdateController, getUpdateMode } = require('./updater.cjs');
 const { createWalker } = require('./movement.cjs');
 const { isPetRegion } = require('./interaction.cjs');
+const { createStartupController } = require('./startup.cjs');
 const smoke = process.argv.includes('--smoke-test');
 const smokeRoot = app.isPackaged ? path.join(path.dirname(app.getPath('exe')), '.preview') : path.join(__dirname, '../.preview');
 if (smoke) app.setPath('userData', path.join(smokeRoot, 'smoke-data'));
@@ -20,7 +21,8 @@ let pointerOverride = smoke ? {x:-999999,y:-999999} : null;
 const walker = createWalker();
 let motion = {walkDistance:0,walkSpeed:0,offsetX:0,offsetY:0};
 let isQuitting = false;
-let updates;
+let updates, startup;
+const currentSettings = () => ({ ...store.get(), ...startup.get() });
 const petSize = () => ({ width: Math.round(194 * settings.scale), height: Math.round(250 * settings.scale) });
 function emit(win, channel, data) { if (win && !win.isDestroyed()) win.webContents.send(channel, data); }
 function broadcast(channel, data) { emit(pet, channel, data); emit(chat, channel, data); }
@@ -74,10 +76,12 @@ function showChat(view = 'chat') {
 }
 function hideChat() { voiceStop(); silence(); chat.hide(); walker.pause(Date.now(),2500); petState(); }
 function contextMenu() {
+  settings = currentSettings();
   Menu.buildFromTemplate([
     { label: '박주임과 대화하기', click: () => showChat() },
     { label: '산책하기', type: 'checkbox', checked: settings.roam, click: item => updateSettings({ roam: item.checked }) },
     { label: '항상 위에 표시', type: 'checkbox', checked: settings.alwaysOnTop, click: item => updateSettings({ alwaysOnTop: item.checked }) },
+    { label: 'Windows 시작 시 자동 실행', type: 'checkbox', checked: settings.startAtLogin, enabled: settings.startAtLoginSupported, click: item => updateSettings({ startAtLogin: item.checked }).catch(error => { showChat('settings'); emit(chat, 'chat:event', { type: 'settings-error', message: error.message }); }) },
     { type: 'separator' }, { label: '설정', click: () => showChat('settings') },
     { label: '화면 오른쪽으로 돌아오기', click: resetPosition },
     { type: 'separator' },
@@ -93,13 +97,20 @@ function resetPosition() {
   placeChat();
 }
 async function updateSettings(input) {
-  settings = await store.save(input);
+  await store.save(input);
+  try {
+    if (typeof input.startAtLogin === 'boolean' && (input.startAtLogin !== startup.get().startAtLogin || startup.get().startAtLoginBlocked)) startup.set(input.startAtLogin);
+  } catch (error) {
+    await store.save({ startAtLogin: startup.get().startAtLogin });
+    settings = currentSettings(); broadcast('settings:changed', settings);
+    throw error;
+  }
+  settings = currentSettings();
   pet.setAlwaysOnTop(settings.alwaysOnTop, 'floating'); chat.setAlwaysOnTop(settings.alwaysOnTop, 'floating');
   pet.setSize(petSize().width, petSize().height);
   const bounds = pet.getBounds(), area = screen.getDisplayMatching(bounds).workArea;
   pet.setPosition(...Object.values(clampPosition(bounds, area, bounds))); placeChat();
   walker.reset(pet.getBounds(),Date.now(),2500);updatePetPointer();
-  app.setLoginItemSettings({ openAtLogin: settings.startAtLogin, path: process.env.PORTABLE_EXECUTABLE_FILE || app.getPath('exe') });
   if (!settings.speak) silence();
   broadcast('settings:changed', settings); return settings;
 }
@@ -140,7 +151,7 @@ function registerIpc() {
   handle('update:get', null, () => updates.get());
   handle('update:check', 'chat', () => updates.check());
   handle('update:install', 'chat', () => updates.install());
-  handle('settings:get', null, () => settings);
+  handle('settings:get', null, () => (settings = currentSettings()));
   handle('settings:save', 'chat', input => updateSettings(input));
   handle('pet:chat', 'pet', () => chat.isVisible() ? hideChat() : showChat());
   handle('chat:hide', 'chat', hideChat);
@@ -219,7 +230,9 @@ else {
     });
     session.defaultSession.setPermissionRequestHandler((_web, _permission, callback) => callback(false));
     session.defaultSession.setPermissionCheckHandler(() => false);
-    store = await createStore(app.getPath('userData'), safeStorage); settings = store.get();
+    const mode = smoke ? 'development' : getUpdateMode({ packaged:app.isPackaged, platform:process.platform, portable:!!process.env.PORTABLE_EXECUTABLE_FILE, executable:app.getPath('exe') });
+    startup = createStartupController({ app, mode });
+    store = await createStore(app.getPath('userData'), safeStorage); settings = currentSettings();
     pet = secureWindow({ ...petSize(), transparent: true, skipTaskbar: true, hasShadow: false, title: '박주임 미니미' });
     chat = secureWindow({ width: 380, height: 490, transparent: true, hasShadow: false, skipTaskbar: true, title: '박주임과 대화' });
     pet.setAlwaysOnTop(settings.alwaysOnTop, 'floating'); chat.setAlwaysOnTop(settings.alwaysOnTop, 'floating');
@@ -227,7 +240,6 @@ else {
     chat.on('close', event => { if (!isQuitting) { event.preventDefault(); hideChat(); } });
     pet.on('closed', () => { if (!isQuitting) app.quit(); });
     chat.on('hide', () => { emit(chat, 'view:open', 'hidden'); petState(); });
-    const mode = smoke ? 'development' : getUpdateMode({ packaged:app.isPackaged, platform:process.platform, portable:!!process.env.PORTABLE_EXECUTABLE_FILE, executable:app.getPath('exe') });
     updates = createUpdateController({
       updater: mode === 'installed' ? require('electron-updater').autoUpdater : null,
       mode, version:app.getVersion(), notify:state=>broadcast('update:state',state),

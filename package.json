@@ -20,7 +20,8 @@
     "dist": "node scripts/build.cjs",
     "pack": "electron-builder --dir --win --x64",
     "smoke": "electron . --smoke-test",
-    "verify:feed": "electron scripts/verify-update-feed.cjs"
+    "verify:feed": "electron scripts/verify-update-feed.cjs",
+    "verify:startup": "electron scripts/verify-startup.cjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "1.3.0",

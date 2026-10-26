@@ -29,6 +29,10 @@
   <section id="settings-panel" class="settings-panel" aria-label="박주임 설정" hidden>
     <header class="settings-header"><button class="icon-button" id="back-chat" aria-label="대화로 돌아가기"><svg><use href="#i-back"/></svg></button><h2>박주임 설정</h2><span>나에게 맞게, 조금씩.</span></header>
     <form id="settings-form" class="settings-form">
+      <span class="section-label">시작 설정</span>
+      <label class="toggle-row"><span><strong>Windows 시작 시 자동 실행</strong><small>로그인하면 대화창 없이 박주임만 나타나요.</small></span><input id="setting-start" type="checkbox" role="switch" aria-describedby="startup-status"><span class="switch" aria-hidden="true"></span></label>
+      <p id="startup-status" class="settings-feedback" role="status">변경하면 바로 적용돼요.</p>
+      <div class="section-divider"></div>
       <section class="update-settings" aria-label="앱 업데이트"><div class="settings-intro"><span class="section-label">앱 업데이트</span><span id="app-version" class="key-status"></span></div><p id="update-status" role="status">업데이트 상태를 확인하고 있어요.</p><div class="field-actions"><button id="check-update" type="button" class="text-button">업데이트 확인</button><button id="install-update" type="button" class="text-button" hidden>지금 업데이트</button><button id="open-releases" type="button" class="text-button">최신 설치 파일 ↗</button></div><small>설치형은 새 버전을 자동으로 내려받고 앱을 종료할 때 적용해요.</small></section>
       <div class="section-divider"></div>
       <div class="settings-intro"><span class="section-label">CLAUDE 연결</span><span id="key-status" class="key-status">연결 전</span></div>
@@ -40,7 +44,6 @@
       <label class="toggle-row"><span><strong>자유롭게 산책하기</strong><small>마우스를 올리거나 대화할 때는 멈춰요.</small></span><input id="setting-roam" type="checkbox" role="switch"><span class="switch" aria-hidden="true"></span></label>
       <label class="toggle-row"><span><strong>항상 위에 표시</strong><small>다른 프로그램 위에서도 만날 수 있어요.</small></span><input id="setting-top" type="checkbox" role="switch"><span class="switch" aria-hidden="true"></span></label>
       <label class="toggle-row"><span><strong>답변 읽어 주기</strong><small>Windows에 설치된 한국어 음성을 사용해요.</small></span><input id="setting-speak" type="checkbox" role="switch"><span class="switch" aria-hidden="true"></span></label>
-      <label class="toggle-row"><span><strong>컴퓨터를 켜면 함께 시작</strong></span><input id="setting-start" type="checkbox" role="switch"><span class="switch" aria-hidden="true"></span></label>
       <label class="field range-field">미니미 크기 <output id="scale-value">100%</output><input id="setting-scale" type="range" min="0.7" max="1.4" step="0.05"></label>
       <label class="field range-field">산책 속도 <output id="speed-value">느긋하게</output><input id="setting-speed" type="range" min="8" max="60" step="1"></label>
       <div class="section-divider"></div><span class="section-label">대화 취향</span>
