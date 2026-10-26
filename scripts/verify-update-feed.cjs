@@ -11,7 +11,7 @@ async function main(){
  const updater=new NsisUpdater();
  // Only the test's version is synthetic; HTTP, manifests and SHA-512 validation
  // all use the production updater and Electron networking implementation.
- updater.currentVersion=new(require('semver').SemVer)('1.0.0');
+ updater.currentVersion=new updater.currentVersion.constructor('1.0.0');
  updater.updateConfigPath=config;updater.forceDevUpdateConfig=true;
  updater.autoDownload=false;updater.autoInstallOnAppQuit=false;updater.allowPrerelease=false;updater.disableWebInstaller=true;updater.disableDifferentialDownload=true;
  updater.on('error',error=>console.error('Updater error:',error.message));
