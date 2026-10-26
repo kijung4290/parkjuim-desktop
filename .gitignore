@@ -1,0 +1,16 @@
+node_modules/
+release/
+release-*/
+.preview/
+*.log
+.env
+.env.*
+!.env.example
+*.pem
+*.p12
+*.pfx
+scripts/qa-browser-*.mjs
+scripts/voice-capabilities.ps1
+tmp/
+.DS_Store
+Thumbs.db

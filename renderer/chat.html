@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'"><title>박주임과 대화</title><link rel="stylesheet" href="chat.css"></head>
+<body><link rel="stylesheet" href="updates.css">
+<svg class="icon-definitions" xmlns="http://www.w3.org/2000/svg"><defs>
+<symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6"/></symbol>
+<symbol id="i-settings" viewBox="0 0 24 24"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3"/><circle cx="15" cy="17" r="3"/></symbol>
+<symbol id="i-back" viewBox="0 0 24 24"><path d="m14 6-6 6 6 6"/></symbol>
+<symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3m-4 0h8"/></symbol>
+<symbol id="i-send" viewBox="0 0 24 24"><path d="M12 19V5m-6 6 6-6 6 6"/></symbol>
+<symbol id="i-sound" viewBox="0 0 24 24"><path d="m11 4-6 5H2v6h3l6 5zM15 8a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14"/></symbol>
+<symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+<symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></symbol>
+<symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+</defs></svg>
+<main class="window">
+  <header class="topbar">
+    <div class="identity"><div class="avatar"><img src="reference.png" alt=""><i></i></div><div><strong>박주임<span class="tag">미니미</span></strong><span class="presence" id="presence">곁에 있어요</span></div></div>
+    <nav class="window-actions" aria-label="대화 메뉴"><button class="icon-button" id="new-chat" title="새 대화" aria-label="새 대화"><svg><use href="#i-plus"/></svg></button><button class="icon-button" id="open-settings" title="설정" aria-label="설정 열기"><svg><use href="#i-settings"/></svg></button><button class="icon-button" id="close-chat" title="접어 두기" aria-label="대화창 닫기"><svg><use href="#i-close"/></svg></button></nav>
+  </header>
+  <section id="conversation" class="conversation" aria-label="대화 내용" tabindex="0">
+    <div id="welcome" class="welcome"><div class="welcome-illustration"><span class="orbit orbit-one"></span><span class="orbit orbit-two"></span><img src="reference.png" alt="카키색 니트를 입은 박주임"><span class="little-note">잠깐, 쉬어 가요.</span></div><p class="eyebrow">당신의 작은 바탕화면 동료</p><h1>불렀어요?<br>무엇부터 같이 할까요.</h1><p class="welcome-copy">정리 안 된 생각도, 소소한 이야기도 좋아요.</p><div class="suggestions"><button data-prompt="오늘 할 일이 많아서 막막해요. 같이 우선순위를 정리해 주세요."><span>↗</span>할 일 정리</button><button data-prompt="제가 쓴 글을 자연스럽게 다듬는 걸 도와주세요."><span>✎</span>글 다듬기</button><button data-prompt="잠깐 쉬면서 이야기 나누고 싶어요."><span>☁</span>잠깐 수다</button></div></div>
+    <div id="messages" role="log" aria-label="박주임과 나눈 대화" aria-live="polite" aria-relevant="additions"></div>
+  </section>
+  <div id="update-banner" class="update-banner" role="status" hidden><span id="update-banner-text"></span><button id="update-now" type="button">지금 업데이트</button></div>
+  <div id="notice" class="notice" role="status" hidden></div>
+  <div id="connection-tip" class="connection-tip" hidden><span class="key-dot"></span>처음이라면, Claude API 키를 연결해 주세요.<button id="connect-key">연결하기 ↗</button></div>
+  <form id="composer" class="composer"><div class="input-row"><textarea id="message" aria-label="박주임에게 할 말" placeholder="박주임, 있잖아요…" rows="1" maxlength="12000"></textarea><button type="submit" class="send-button" id="send" title="보내기" aria-label="메시지 보내기"><svg><use href="#i-send"/></svg></button></div><div class="composer-bottom"><button type="button" id="microphone" class="voice-button" aria-label="음성 입력 시작" aria-pressed="false"><svg><use href="#i-mic"/></svg><span id="mic-label">말로 입력</span></button><button type="button" id="toggle-speech" class="voice-button" aria-label="답변 읽기 켜기 또는 끄기" aria-pressed="true"><svg><use href="#i-sound"/></svg><span>답변 읽기</span></button><span class="input-hint">Enter로 보내기</span></div></form>
+  <footer class="footnote">Claude와 함께하는 박주임 · 대화는 이 실행 중에만 기억해요</footer>
+  <section id="settings-panel" class="settings-panel" aria-label="박주임 설정" hidden>
+    <header class="settings-header"><button class="icon-button" id="back-chat" aria-label="대화로 돌아가기"><svg><use href="#i-back"/></svg></button><h2>박주임 설정</h2><span>나에게 맞게, 조금씩.</span></header>
+    <form id="settings-form" class="settings-form">
+      <section class="update-settings" aria-label="앱 업데이트"><div class="settings-intro"><span class="section-label">앱 업데이트</span><span id="app-version" class="key-status"></span></div><p id="update-status" role="status">업데이트 상태를 확인하고 있어요.</p><div class="field-actions"><button id="check-update" type="button" class="text-button">업데이트 확인</button><button id="install-update" type="button" class="text-button" hidden>지금 업데이트</button><button id="open-releases" type="button" class="text-button">최신 설치 파일 ↗</button></div><small>설치형은 새 버전을 자동으로 내려받고 앱을 종료할 때 적용해요.</small></section>
+      <div class="section-divider"></div>
+      <div class="settings-intro"><span class="section-label">CLAUDE 연결</span><span id="key-status" class="key-status">연결 전</span></div>
+      <label class="field">API 키<input id="api-key" type="password" placeholder="sk-ant-…" autocomplete="off" spellcheck="false"><small>이 PC의 Windows 계정으로 암호화해 저장해요.</small></label>
+      <div class="field-actions"><button type="button" id="get-key" class="text-button">API 키 발급받기 ↗</button><button type="button" id="delete-key" class="text-button danger" hidden>저장된 키 삭제</button></div>
+      <label class="field">Claude 모델<input id="model" type="text" spellcheck="false" required maxlength="100"><small>계정에서 사용할 수 있는 모델 ID를 입력해 주세요.</small></label>
+      <p class="privacy-note">보낸 대화는 Anthropic API로 전송되며 사용량에 따라 요금이 발생해요. Claude 구독과 API 결제는 별개예요.</p>
+      <div class="section-divider"></div><span class="section-label">산책과 목소리</span>
+      <label class="toggle-row"><span><strong>자유롭게 산책하기</strong><small>마우스를 올리거나 대화할 때는 멈춰요.</small></span><input id="setting-roam" type="checkbox" role="switch"><span class="switch" aria-hidden="true"></span></label>
+      <label class="toggle-row"><span><strong>항상 위에 표시</strong><small>다른 프로그램 위에서도 만날 수 있어요.</small></span><input id="setting-top" type="checkbox" role="switch"><span class="switch" aria-hidden="true"></span></label>
+      <label class="toggle-row"><span><strong>답변 읽어 주기</strong><small>Windows에 설치된 한국어 음성을 사용해요.</small></span><input id="setting-speak" type="checkbox" role="switch"><span class="switch" aria-hidden="true"></span></label>
+      <label class="toggle-row"><span><strong>컴퓨터를 켜면 함께 시작</strong></span><input id="setting-start" type="checkbox" role="switch"><span class="switch" aria-hidden="true"></span></label>
+      <label class="field range-field">미니미 크기 <output id="scale-value">100%</output><input id="setting-scale" type="range" min="0.7" max="1.4" step="0.05"></label>
+      <label class="field range-field">산책 속도 <output id="speed-value">느긋하게</output><input id="setting-speed" type="range" min="8" max="60" step="1"></label>
+      <div class="section-divider"></div><span class="section-label">대화 취향</span>
+      <label class="field">나를 부를 이름<input id="nickname" type="text" maxlength="40" placeholder="예: 주영님"></label>
+      <label class="field">박주임에게 미리 알려 둘 것<textarea id="system-prompt" rows="3" maxlength="4000" placeholder="예: 사회복지 업무를 도와주고 답변은 짧게 해 주세요."></textarea></label>
+      <div class="speech-help"><strong>말로 대화하려면</strong><p>마이크를 누르고 말하면 입력창에 적혀요. 내용을 확인하고 전송하세요. 한국어 인식기가 없다면 입력창에서 <kbd>Win</kbd> + <kbd>H</kbd>로 Windows 음성 입력을 사용할 수 있어요.</p><button type="button" id="speech-settings" class="text-button">Windows 음성 설정 열기 ↗</button></div>
+      <p id="settings-feedback" role="status" class="settings-feedback"></p><button class="save-button" type="submit"><svg><use href="#i-check"/></svg>설정 저장</button>
+    </form>
+  </section>
+</main><script type="module" src="chat.js"></script></body></html>
