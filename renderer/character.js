@@ -1,4 +1,5 @@
 import * as THREE from '/vendor/three.module.js';
+import { legPose, STRIDE_PIXELS } from './gait.mjs';
 
 // A real mesh character: soft clay materials, dimensional curls, independent joints.
 export function createCharacter(scene) {
@@ -42,15 +43,18 @@ export function createCharacter(scene) {
     oval(joint,skin,[side*.1,-.65,.025],[.105,.13,.10]);
     oval(joint,skin,[side*.012,-.62,.075],[.052,.073,.047]);
   }
-  const legs = [];
+  const legs = [], knees = [], feet = [];
   for (const side of [-1,1]) {
     const joint = new THREE.Group(); joint.position.set(side*.2,.94,0); root.add(joint); legs.push(joint);
-    oval(joint,trousers,[0,-.30,0],[.175,.40,.20]);
-    oval(joint,shoes,[0,-.65,.07],[.19,.14,.29]);
-    oval(joint,sole,[0,-.72,.08],[.19,.05,.28]);
-    for(let i=0;i<3;i++) tube(joint,[[-.07,-.555,.16+i*.035],[.07,-.555,.16+i*.035]],.009,white);
+    oval(joint,trousers,[0,-.16,0],[.17,.22,.185]);
+    const knee=new THREE.Group();knee.position.y=-.34;joint.add(knee);knees.push(knee);
+    oval(knee,trousers,[0,-.14,0],[.155,.205,.175]);
+    const foot=new THREE.Group();foot.position.set(0,-.32,0);knee.add(foot);feet.push(foot);
+    oval(foot,shoes,[0,0,.07],[.19,.14,.29]);
+    oval(foot,sole,[0,-.075,.08],[.19,.05,.28]);
+    for(let i=0;i<3;i++) tube(foot,[[-.07,.095,.16+i*.035],[.07,.095,.16+i*.035]],.009,white);
   }
-  let state = { moving: false, direction: 1, chatting: false, thinking: false, speaking: false }, pointer = {x:0,y:0}, nextBlink=2.3, blinkStart=-10, waveUntil=2;
+  let state = { moving:false,direction:1,chatting:false,thinking:false,speaking:false,walkDistance:0,scale:1 }, pointer={x:0,y:0},nextBlink=2.3,blinkStart=-10,waveUntil=0,walkBlend=0,gaitDistance=0;
   const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
   return {
     root,
@@ -58,18 +62,26 @@ export function createCharacter(scene) {
     look(x,y) { pointer={x,y}; },
     wave() { waveUntil=performance.now()/1000+1.4; },
     update(t,dt) {
-      const lerp=1-Math.exp(-dt*7), walking=state.moving && !reduced;
-      const yaw=walking ? state.direction*.65 : pointer.x*.1;
+      // Locomotion is essential in a desktop pet. Reduced-motion preference
+      // suppresses decoration, not the steps that explain the window's travel.
+      const lerp=1-Math.exp(-dt*7), walking=state.moving;
+      walkBlend=THREE.MathUtils.lerp(walkBlend,walking?1:0,1-Math.exp(-dt*6));
+      gaitDistance=THREE.MathUtils.lerp(gaitDistance,state.walkDistance,1-Math.exp(-dt*22));
+      const phase=state.previewWalk?t*4.3:gaitDistance/(STRIDE_PIXELS*state.scale)*Math.PI*2;
+      const yaw=walking ? state.direction*1.1 : pointer.x*.08;
       root.rotation.y=THREE.MathUtils.lerp(root.rotation.y,yaw,lerp);
-      root.position.y = reduced ? 0 : (walking ? Math.abs(Math.sin(t*7))*.045 : Math.sin(t*2)*.014);
-      torso.scale.y=1+(reduced ? 0 : Math.sin(t*2)*.008);
+      root.position.y = walkBlend*(-.02+(reduced?0:Math.cos(phase*2)*.003));
+      root.rotation.z=reduced?0:Math.sin(phase)*.012*walkBlend;
+      torso.scale.y=1+(reduced?0:Math.sin(t*1.8)*.004*(1-walkBlend));
       head.rotation.z=THREE.MathUtils.lerp(head.rotation.z,state.thinking ? Math.sin(t*1.5)*.045 : -pointer.x*.035,lerp);
-      head.rotation.y=THREE.MathUtils.lerp(head.rotation.y,pointer.x*.09,lerp);
+      head.rotation.y=THREE.MathUtils.lerp(head.rotation.y,walking?-state.direction*.18:pointer.x*.07,lerp);
       head.rotation.x=THREE.MathUtils.lerp(head.rotation.x,pointer.y*.07,lerp);
       for(let i=0;i<2;i++) {
-        const phase=t*7+i*Math.PI;
-        legs[i].rotation.x=THREE.MathUtils.lerp(legs[i].rotation.x,walking ? Math.sin(phase)*.38 : 0,lerp);
-        arms[i].rotation.x=THREE.MathUtils.lerp(arms[i].rotation.x,walking ? -Math.sin(phase)*.28 : Math.sin(t*1.6+i)*.025,lerp);
+        const step=phase+i*Math.PI,pose=legPose(step);
+        legs[i].rotation.x=pose.hip*walkBlend;
+        knees[i].rotation.x=pose.knee*walkBlend;
+        feet[i].rotation.x=pose.ankle*walkBlend;
+        arms[i].rotation.x=THREE.MathUtils.lerp(arms[i].rotation.x,-Math.sin(step)*.13*walkBlend,lerp);
       }
       arms[1].rotation.z=THREE.MathUtils.lerp(arms[1].rotation.z,!reduced && t<waveUntil ? 2.0+Math.sin(t*16)*.23 : .04,lerp);
       arms[0].rotation.z=-.04;

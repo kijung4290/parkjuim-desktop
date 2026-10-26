@@ -6,7 +6,7 @@ async function main(){
  const latest=JSON.parse(fs.readFileSync(path.join(release,'latest-build.json'),'utf8'));
  const archive=path.join(release,latest.directory,'win-unpacked/resources/app.asar');
  for(const directory of ['electron','renderer'])for(const name of fs.readdirSync(path.join(root,directory))){
-  if(!/\.(cjs|js|html|css|ps1|png)$/.test(name))continue;
+  if(!/\.(cjs|mjs|js|html|css|ps1|png)$/.test(name))continue;
   const file=`${directory}/${name}`;
   assert.ok(asar.extractFile(archive,file).equals(fs.readFileSync(path.join(root,file))),`Packaged file differs from source: ${file}`);
  }

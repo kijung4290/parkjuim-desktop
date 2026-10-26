@@ -6,23 +6,57 @@ const { spawn } = require('node:child_process');
 const { DEFAULTS, SYSTEM_PROMPT, clampPosition, chatBounds, validateMessages } = require('./core.cjs');
 const { createStore } = require('./store.cjs');
 const { createUpdateController, getUpdateMode } = require('./updater.cjs');
+const { createWalker } = require('./movement.cjs');
+const { isPetRegion } = require('./interaction.cjs');
 const smoke = process.argv.includes('--smoke-test');
 const smokeRoot = app.isPackaged ? path.join(path.dirname(app.getPath('exe')), '.preview') : path.join(__dirname, '../.preview');
 if (smoke) app.setPath('userData', path.join(smokeRoot, 'smoke-data'));
 protocol.registerSchemesAsPrivileged([{ scheme: 'park', privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
 app.setAppUserModelId('kr.parkjuim.desktop');
 let pet, chat, tray, store, activeRequest, voiceProcess, speechProcess, settings, dragging, wanderTimer;
-let hovered = false, target = null, restUntil = Date.now() + 5000, lastTick = Date.now(), moving = false, direction = 1;
+let hovered = false, lastTick = Date.now(), moving = false, direction = 1, pressed = false, pressAnchor = null;
+let inputEnabled = null, lastCursor = null;
+let pointerOverride = smoke ? {x:-999999,y:-999999} : null;
+const walker = createWalker();
+let motion = {walkDistance:0,walkSpeed:0,offsetX:0,offsetY:0};
 let isQuitting = false;
 let updates;
 const petSize = () => ({ width: Math.round(194 * settings.scale), height: Math.round(250 * settings.scale) });
 function emit(win, channel, data) { if (win && !win.isDestroyed()) win.webContents.send(channel, data); }
 function broadcast(channel, data) { emit(pet, channel, data); emit(chat, channel, data); }
-function petState(extra = {}) { emit(pet, 'pet:state', { moving, direction, chatting: !!chat?.isVisible(), ...extra }); }
+function petState(extra = {}) { emit(pet, 'pet:state', { ...motion, moving, direction, hovered, scale:settings?.scale || 1, chatting: !!chat?.isVisible(), ...extra }); }
+const readPointer = () => pointerOverride || screen.getCursorScreenPoint();
+function setPetInteractive(value) {
+  if (inputEnabled === value || !pet || pet.isDestroyed()) return;
+  inputEnabled = value;
+  pet.setIgnoreMouseEvents(!value, {forward:true});
+}
+function updatePetPointer() {
+  if (!pet || pet.isDestroyed()) return;
+  const point=readPointer(), bounds=pet.getBounds(), over=isPetRegion(point,bounds);
+  setPetInteractive(pressed || !!dragging || over);
+  if (hovered !== over) {
+    hovered=over;
+    if (over) { walker.pause(Date.now()); moving=false; }
+    petState();
+  }
+  if (over && (!lastCursor || point.x!==lastCursor.x || point.y!==lastCursor.y)) {
+    emit(pet,'pet:state',{cursor:{x:(point.x-bounds.x)/bounds.width*2-1,y:(point.y-bounds.y)/bounds.height*2-1}});
+  }
+  lastCursor=point;
+}
+function releasePetPress() {
+  pressed=false;dragging=null;pressAnchor=null;
+  if(pet&&!pet.isDestroyed())walker.reset(pet.getBounds(),Date.now(),1800);
+  updatePetPointer();
+}
 function trusted(event, kind) {
   const win = BrowserWindow.fromWebContents(event.sender);
   const expected = kind === 'pet' ? pet : kind === 'chat' ? chat : null;
-  if ((!expected && win !== pet && win !== chat) || (expected && win !== expected) || event.senderFrame !== event.sender.mainFrame || !event.senderFrame.url.startsWith('park://app/')) throw new Error('허용되지 않은 요청입니다.');
+  if ((!expected && win !== pet && win !== chat) || (expected && win !== expected) || event.senderFrame !== event.sender.mainFrame || !event.senderFrame.url.startsWith('park://app/')) {
+    if(smoke)console.error('IPC TRUST DIAGNOSTIC',JSON.stringify({kind,win:win?.id,expected:expected?.id,pet:pet?.id,chat:chat?.id,sender:event.sender.id,sameFrame:event.senderFrame===event.sender.mainFrame,frame:event.senderFrame?.routingId,main:event.sender.mainFrame?.routingId,url:event.senderFrame?.url}));
+    throw new Error('허용되지 않은 요청입니다.');
+  }
 }
 function handle(channel, kind, fn) { ipcMain.handle(channel, async (event, ...args) => { trusted(event, kind); try { return await fn(...args); } catch (error) { return { error: error.message || '요청을 처리하지 못했어요.' }; } }); }
 function on(channel, kind, fn) { ipcMain.on(channel, (event, ...args) => { try { trusted(event, kind); fn(...args); } catch {} }); }
@@ -35,10 +69,10 @@ function secureWindow(options) {
 }
 function placeChat() { if (chat && !chat.isDestroyed()) chat.setBounds(chatBounds(pet.getBounds(), screen.getDisplayMatching(pet.getBounds()).workArea)); }
 function showChat(view = 'chat') {
-  target = null; moving = false; pet.setIgnoreMouseEvents(false); placeChat(); chat.show(); chat.focus();
+  walker.pause(Date.now()); moving = false; placeChat(); chat.show(); chat.focus();
   emit(chat, 'view:open', view); petState();
 }
-function hideChat() { voiceStop(); silence(); chat.hide(); restUntil = Date.now() + 4000; petState(); }
+function hideChat() { voiceStop(); silence(); chat.hide(); walker.pause(Date.now(),2500); petState(); }
 function contextMenu() {
   Menu.buildFromTemplate([
     { label: '박주임과 대화하기', click: () => showChat() },
@@ -52,44 +86,41 @@ function contextMenu() {
   ]).popup();
 }
 function resetPosition() {
-  const a = screen.getPrimaryDisplay().workArea, size = petSize(); target = null;
+  const a = screen.getPrimaryDisplay().workArea, size = petSize();
   pet.setBounds({ ...size, x: a.x + a.width - size.width - 28, y: a.y + a.height - size.height - 16 });
+  walker.reset(pet.getBounds(),Date.now(),3000);moving=false;
+  motion={...motion,walkSpeed:0,offsetX:0,offsetY:0};petState();updatePetPointer();
   placeChat();
 }
 async function updateSettings(input) {
   settings = await store.save(input);
   pet.setAlwaysOnTop(settings.alwaysOnTop, 'floating'); chat.setAlwaysOnTop(settings.alwaysOnTop, 'floating');
-  pet.setSize(petSize().width, petSize().height); target = null;
+  pet.setSize(petSize().width, petSize().height);
   const bounds = pet.getBounds(), area = screen.getDisplayMatching(bounds).workArea;
   pet.setPosition(...Object.values(clampPosition(bounds, area, bounds))); placeChat();
+  walker.reset(pet.getBounds(),Date.now(),2500);updatePetPointer();
   app.setLoginItemSettings({ openAtLogin: settings.startAtLogin, path: process.env.PORTABLE_EXECUTABLE_FILE || app.getPath('exe') });
   if (!settings.speak) silence();
   broadcast('settings:changed', settings); return settings;
 }
 function wander() {
-  const now = Date.now(), dt = Math.min((now - lastTick) / 1000, 0.1); lastTick = now;
+  const now = Date.now(), dt = Math.max(0,Math.min((now - lastTick) / 1000, 0.05)); lastTick = now;
   if (!pet || pet.isDestroyed()) return;
+  updatePetPointer();
   if (dragging) {
-    const cursor = screen.getCursorScreenPoint(), size = pet.getBounds();
+    const cursor = readPointer(), size = pet.getBounds();
     const a = screen.getDisplayNearestPoint(cursor).workArea;
     const p = clampPosition({ x: cursor.x - dragging.x, y: cursor.y - dragging.y }, a, size);
-    pet.setPosition(p.x, p.y); return;
-  }
-  if (!settings.roam || hovered || chat.isVisible() || now < restUntil) {
-    if (moving) { moving = false; petState(); } return;
+    pet.setPosition(p.x, p.y);walker.reset(p,now,2500);return;
   }
   const b = pet.getBounds(), a = screen.getDisplayMatching(b).workArea;
-  if (!target) {
-    target = clampPosition({ x: a.x + Math.random() * (a.width - b.width), y: a.y + a.height * (0.45 + Math.random() * 0.55) }, a, b);
-  }
-  const dx = target.x - b.x, dy = target.y - b.y, distance = Math.hypot(dx, dy);
-  if (distance < 3) { target = null; restUntil = now + 5000 + Math.random() * 10000; moving = false; petState(); return; }
-  const nextDirection = dx < 0 ? -1 : 1;
-  if (!moving || nextDirection !== direction) { moving = true; direction = nextDirection; petState(); }
-  const step = Math.min(distance, settings.speed * dt);
-  // Fractional movement is accumulated, so low speed also works at high refresh rates.
-  target.fx = (target.fx ?? b.x) + dx / distance * step; target.fy = (target.fy ?? b.y) + dy / distance * step;
-  const p = clampPosition({ x: target.fx, y: target.fy }, a, b); pet.setPosition(p.x, p.y);
+  const wasMoving=moving;
+  const next=walker.step({bounds:b,area:a,dt,now,speed:settings.speed,scale:settings.scale,paused:!settings.roam||hovered||pressed||chat.isVisible()});
+  const x=Math.round(next.x),y=Math.round(next.y);
+  if(x!==b.x||y!==b.y)pet.setPosition(x,y);
+  moving=next.moving;direction=next.direction;
+  motion={walkDistance:next.distance,walkSpeed:next.speed,offsetX:next.x-x,offsetY:next.y-y};
+  if(moving||wasMoving!==moving)petState();
 }
 function voiceStop() { if (voiceProcess) { voiceProcess.kill(); voiceProcess = null; } emit(chat, 'voice:event', { type: 'stopped' }); }
 function silence() { if (speechProcess) { speechProcess.kill(); speechProcess = null; } petState({ speaking: false }); }
@@ -114,11 +145,11 @@ function registerIpc() {
   handle('pet:chat', 'pet', () => chat.isVisible() ? hideChat() : showChat());
   handle('chat:hide', 'chat', hideChat);
   handle('pet:menu', 'pet', contextMenu);
-  on('pet:hover', 'pet', value => { hovered = value === true; if (hovered) { target = null; moving = false; petState(); } });
-  on('pet:hit', 'pet', value => { if (!dragging) pet.setIgnoreMouseEvents(value !== true, { forward: true }); });
+  on('pet:pointer','pet',updatePetPointer);
   on('pet:drag', 'pet', phase => {
-    if (phase === 'start') { const p = screen.getCursorScreenPoint(), b = pet.getBounds(); dragging = { x: p.x - b.x, y: p.y - b.y }; moving = false; target = null; pet.setIgnoreMouseEvents(false); petState(); }
-    else { dragging = null; restUntil = Date.now() + 4000; if (chat.isVisible()) placeChat(); }
+    if(phase==='press'){const p=readPointer(),b=pet.getBounds();pressed=true;pressAnchor={x:p.x-b.x,y:p.y-b.y};walker.pause(Date.now());moving=false;setPetInteractive(true);petState();}
+    else if (phase === 'start') { const p=readPointer(),b=pet.getBounds();dragging=pressAnchor||{x:p.x-b.x,y:p.y-b.y};pressed=true;moving=false;walker.pause(Date.now());setPetInteractive(true);petState(); }
+    else if(phase==='end'){releasePetPress();if(chat.isVisible())placeChat();}
   });
   handle('chat:cancel', 'chat', () => activeRequest?.controller.abort());
   handle('chat:send', 'chat', async (id, input) => {
@@ -207,28 +238,64 @@ else {
     resetPosition(); pet.showInactive();
     const icon = nativeImage.createFromPath(path.join(__dirname, '../assets/tray.png'));
     tray = new Tray(icon); tray.setToolTip('박주임 미니미 · 클릭해서 대화하기'); tray.on('click', () => showChat()); tray.on('right-click', contextMenu);
-    wanderTimer = setInterval(wander, 1000 / 30);
+    wanderTimer = setInterval(wander, 1000 / 60);
     updates.start();
     screen.on('display-metrics-changed', resetPosition); screen.on('display-removed', resetPosition);
-    app.on('browser-window-blur', () => { if (dragging) { dragging = null; hovered = false; restUntil = Date.now() + 2000; } });
+    app.on('browser-window-blur', () => { if (dragging || pressed) releasePetPress(); });
     if (process.argv.includes('--dev')) chat.webContents.openDevTools({ mode: 'detach' });
     if (smoke) {
       try {
         await new Promise(resolve => setTimeout(resolve, 1200));
         // Exercise movement and pauses through the real native window and IPC.
         const start = pet.getBounds();
-        hovered = false; restUntil = 0; target = { x: start.x - 100, y: start.y };
-        await new Promise(resolve => setTimeout(resolve, 1100));
+        hovered=false;walker.setGoal(start,{x:start.x-100,y:start.y},Date.now());
+        fs.mkdirSync(smokeRoot,{recursive:true});
+        await new Promise(resolve=>setTimeout(resolve,550));
+        const walkState=await pet.webContents.executeJavaScript('new Promise(resolve=>requestAnimationFrame(()=>resolve(window.__petTestState())))');
+        if(!walkState.moving||!(walkState.distance>0)||Math.abs(walkState.yaw)<.4)throw new Error(`Essential gait is not animating: ${JSON.stringify(walkState)}`);
+        fs.writeFileSync(path.join(smokeRoot,'walk-a.png'),(await pet.webContents.capturePage()).toPNG());
+        await new Promise(resolve=>setTimeout(resolve,550));
+        fs.writeFileSync(path.join(smokeRoot,'walk-b.png'),(await pet.webContents.capturePage()).toPNG());
         const walked = pet.getBounds().x;
         if (walked >= start.x - 5) throw new Error('Roaming did not move the pet');
-        await pet.webContents.executeJavaScript('window.park.hover(true)');
+        const hoverBounds=pet.getBounds();
+        pointerOverride={x:hoverBounds.x+hoverBounds.width*.5,y:hoverBounds.y+hoverBounds.height*.55};
+        updatePetPointer();
         await new Promise(resolve => setTimeout(resolve, 150));
         const stopped = pet.getBounds().x;
         await new Promise(resolve => setTimeout(resolve, 250));
         if (pet.getBounds().x !== stopped) throw new Error('Pet failed to pause on hover');
-        await pet.webContents.executeJavaScript('window.park.hover(false)');
+        if(!inputEnabled||!hovered)throw new Error('Native cursor recovery did not enable input');
+        const clickPoint={x:Math.round(hoverBounds.width*.5),y:Math.round(hoverBounds.height*.55)};
+        const globalPoint={globalX:Math.round(hoverBounds.x+clickPoint.x),globalY:Math.round(hoverBounds.y+clickPoint.y)};
+        const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+        await pet.webContents.executeJavaScript("window.__clickTrace=[];['pointerdown','mousemove','pointerup','click','blur'].forEach(type=>document.addEventListener(type,event=>{window.__clickTrace.push({type,x:event.clientX,sx:event.screenX,buttons:event.buttons});},true));");
+        const flushInput=async()=>{await pet.webContents.executeJavaScript('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(true))))');await delay(100);};
+        const clickPet=async()=>{
+          pet.focus();await delay(60);
+          pet.webContents.sendInputEvent({type:'mouseDown',button:'left',clickCount:1,...clickPoint,...globalPoint});
+          await delay(50);
+          pet.webContents.sendInputEvent({type:'mouseUp',button:'left',clickCount:1,...clickPoint,...globalPoint});
+          await delay(800);
+          await flushInput();
+        };
+        // No renderer mousemove or window.park.toggleChat call: exercise the
+        // previously untested first click, including focus and pointer capture.
+        await clickPet();
+        if(!chat.isVisible()){console.error('CLICK TRACE',JSON.stringify(await pet.webContents.executeJavaScript('window.__clickTrace')));throw new Error('First actual renderer mouse click did not open chat');}
+        await clickPet();
+        if(chat.isVisible())throw new Error('Second mouse click did not close chat');
+        pet.focus();await delay(60);
+        pet.webContents.sendInputEvent({type:'mouseDown',button:'left',clickCount:1,...clickPoint,...globalPoint});await delay(50);
+        pet.webContents.sendInputEvent({type:'mouseMove',button:'left',modifiers:['leftButtonDown'],x:clickPoint.x+25,y:clickPoint.y,globalX:globalPoint.globalX+25,globalY:globalPoint.globalY});await delay(100);
+        pet.webContents.sendInputEvent({type:'mouseUp',button:'left',clickCount:1,x:clickPoint.x+25,y:clickPoint.y,globalX:globalPoint.globalX+25,globalY:globalPoint.globalY});await delay(800);
+        await flushInput();
+        if(chat.isVisible()){console.error('DRAG TRACE',JSON.stringify(await pet.webContents.executeJavaScript('window.__clickTrace')));throw new Error('Dragging must not open the conversation');}
+        await clickPet();
+        if(!chat.isVisible())throw new Error('Click after drag failed to open chat');
+        pointerOverride={x:-999999,y:-999999};updatePetPointer();
         resetPosition();
-        showChat();
+        placeChat();
         const state = await pet.webContents.executeJavaScript('({ ready: document.body.dataset.ready, error: document.body.dataset.error, canvas: !!document.querySelector("canvas") })');
         if (state.ready !== 'true') throw new Error(`3D renderer failed: ${JSON.stringify(state)}`);
         const dir = smokeRoot; fs.mkdirSync(dir, { recursive: true });
@@ -244,7 +311,6 @@ else {
         if (!secured.hasKey || secured.apiKey || fs.readFileSync(path.join(app.getPath('userData'), 'settings.json'),'utf8').includes(secureKey)) throw new Error('OS key encryption failed');
         await store.save({clearKey:true});
         const paused = pet.getBounds().x;
-        restUntil=0;
         await new Promise(resolve => setTimeout(resolve, 250));
         if (pet.getBounds().x !== paused) throw new Error('Pet failed to pause during chat');
         const capabilities = await new Promise((resolve,reject)=>{
@@ -254,7 +320,7 @@ else {
           proc.on('error',error=>{clearTimeout(timeout);reject(error);});
           proc.on('close',code=>{clearTimeout(timeout);try{const parsed=JSON.parse(output.trim());if(code!==0||parsed.type!=='capabilities')throw new Error(output);resolve(parsed);}catch(error){reject(error);}});
         });
-        const result={...state,chatTest,roaming:true,hoverPause:true,chatPause:true,encryptedKey:true,missingKeyGuard:true,speechHelper:true,capabilities,model:keyState.model,pet:pet.getBounds(),chat:chat.getBounds()};
+        const result={...state,chatTest,nativeClick:true,repeatClick:true,dragDoesNotChat:true,nativeHitRecovery:true,essentialGait:true,reducedMotion:walkState.reduced,roaming:true,hoverPause:true,chatPause:true,encryptedKey:true,missingKeyGuard:true,speechHelper:true,capabilities,model:keyState.model,pet:pet.getBounds(),chat:chat.getBounds()};
         fs.writeFileSync(path.join(dir,'result.json'),JSON.stringify(result,null,2));
         console.log('SMOKE PASS', JSON.stringify(result));
         app.exit(0);
