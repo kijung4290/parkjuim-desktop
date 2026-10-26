@@ -12,4 +12,12 @@
 
 최종 패키징 실행 결과 JSON과 화면 캡처는 `release/latest-build.json`에 기록된 폴더의 `win-unpacked/.preview/`에 있습니다.
 
+## GitHub 자동 업데이트 검증
+
+- 공개 저장소: https://github.com/kijung4290/parkjuim-desktop
+- v1.1.1 태그로 GitHub Actions의 Windows 빌드·테스트·배포 파일과 소스 비교·업데이트 해시 검사·Release 공개가 모두 성공했습니다.
+- 배포 실행 기록: https://github.com/kijung4290/parkjuim-desktop/actions/runs/40299001465
+- `npm run verify:feed -- --download`로 실제 Electron 업데이트 엔진이 공개 피드의 v1.1.1을 발견하고 설치 파일을 내려받아 SHA-512를 검증했습니다. 이 검사는 비교할 이전 버전만 1.0.0으로 가정하며, 실제 네트워크·피드 파싱·다운로드·해시 검증 코드를 사용합니다.
+- 검사 결과는 `.preview/update-feed-check/result.json`에 기록합니다. 현재 사용자 앱을 종료하거나 설치 파일을 실행하지 않았습니다. 실제 설치 교체·재시작은 이 검사에 포함되지 않습니다.
+
 실제 Claude API 호출은 API 키가 제공되지 않아 검증하지 않았습니다. 마이크 녹음·Win+H의 실제 받아쓰기·스피커 출력은 대상 PC에서 확인해야 합니다. 코드 서명은 포함되어 있지 않습니다. v1.1.0부터 설치형의 자동 업데이트와 태그 기반 GitHub Release 워크플로를 지원합니다.
