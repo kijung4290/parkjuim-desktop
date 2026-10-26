@@ -1,10 +1,13 @@
 {
   "name": "parkjuim-desktop",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "바탕화면을 산책하는 3D 박주임 · Claude AI 컴패니언",
   "author": "박주임",
   "private": true,
-  "repository": { "type": "git", "url": "https://github.com/kijung4290/parkjuim-desktop.git" },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kijung4290/parkjuim-desktop.git"
+  },
   "homepage": "https://github.com/kijung4290/parkjuim-desktop#readme",
   "main": "electron/main.cjs",
   "scripts": {
@@ -33,7 +36,14 @@
     "productName": "박주임 미니미",
     "asar": true,
     "electronDist": "node_modules/electron/dist",
-    "publish": [{ "provider": "github", "owner": "kijung4290", "repo": "parkjuim-desktop", "releaseType": "release" }],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "kijung4290",
+        "repo": "parkjuim-desktop",
+        "releaseType": "release"
+      }
+    ],
     "directories": {
       "output": "release"
     },
