@@ -14,6 +14,8 @@
 
 클릭 회귀 검사는 `window.park.toggleChat()`를 직접 부르는 대신 Electron `sendInputEvent`로 마우스 누름·뗌을 전달합니다. renderer의 사전 pointermove 없이 첫 클릭으로 열기, 반복 클릭으로 닫기, 드래그 후 대화창이 열리지 않기, 드래그 뒤 다시 클릭하기를 확인합니다. 화면 마우스 좌표만으로 클릭 무시 상태가 복구되는지도 검사합니다. 현재 Windows UI 검사 도구는 초기화 오류로 사용할 수 없어 실제 하드웨어 마우스 조작 검사는 수행하지 못했습니다.
 
+v1.1.2는 GitHub Actions 빌드와 설치 파일 SHA-512 검증이 통과했습니다. 이 PC에 설치한 Release EXE에서도 클릭·반복 클릭·드래그 후 클릭·native 입력 복구·산책 정지와 재개가 통과했습니다. Windows의 reduced-motion 환경에서도 이동 방향 회전과 필수 걷기가 계속 움직이는 것을 검사하고 두 걷기 프레임을 캡처했습니다. 이전 초기 실행본을 종료하고 자동 업데이트를 지원하는 설치형으로 교체했습니다. 앱 ID와 사용자 설정 저장 위치는 유지했습니다.
+
 ## GitHub 자동 업데이트 검증
 
 - 공개 저장소: https://github.com/kijung4290/parkjuim-desktop
