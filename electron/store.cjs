@@ -8,33 +8,42 @@ async function createStore(directory, safeStorage) {
   try { data = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (error) { if (error.code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error; }
   let settings;
   try { settings = sanitizeSettings(data.settings, DEFAULTS); } catch { settings = { ...DEFAULTS }; }
-  const write = () => { const temp = `${file}.tmp`; fs.writeFileSync(temp, JSON.stringify({ settings, encryptedKey: data.encryptedKey || '' }, null, 2), { mode: 0o600 }); fs.renameSync(temp, file); };
-  let plaintext = '';
-  if (data.encryptedKey) try {
-    const decrypt = safeStorage.decryptStringAsync || safeStorage.decryptString;
-    plaintext = await decrypt.call(safeStorage, Buffer.from(data.encryptedKey, 'base64'));
-  } catch { /* A key from another Windows account cannot be decrypted. */ }
+  const write = () => { const temp = `${file}.tmp`; fs.writeFileSync(temp, JSON.stringify({ settings, encryptedKey: data.encryptedKey || '', encryptedElevenLabsKey: data.encryptedElevenLabsKey || '' }, null, 2), { mode: 0o600 }); fs.renameSync(temp, file); };
+  const secrets = {};
+  for (const field of ['encryptedKey','encryptedElevenLabsKey']) {
+    secrets[field] = '';
+    if (data[field]) try {
+      const decrypt = safeStorage.decryptStringAsync || safeStorage.decryptString;
+      secrets[field] = await decrypt.call(safeStorage, Buffer.from(data[field], 'base64'));
+    } catch { /* A key from another Windows account cannot be decrypted. */ }
+  }
   let queue = Promise.resolve();
   return {
-    get: () => ({ ...settings, hasKey: !!plaintext }), key: () => plaintext,
+    get: () => ({ ...settings, hasKey: !!secrets.encryptedKey, hasElevenLabsKey: !!secrets.encryptedElevenLabsKey }),
+    key: () => secrets.encryptedKey,
+    elevenLabsKey: () => secrets.encryptedElevenLabsKey,
     save(input) {
       const operation = queue.then(async () => {
       const next = sanitizeSettings(input, settings);
-      let encryptedKey = data.encryptedKey;
-      let nextPlaintext = plaintext;
-      if (input.clearKey === true) { encryptedKey = ''; nextPlaintext = ''; }
-      else if (typeof input.apiKey === 'string' && input.apiKey.trim()) {
-        if (!/^sk-ant-[\w-]{12,}$/.test(input.apiKey.trim())) throw new Error('Claude API 키 형식을 확인해 주세요. sk-ant-로 시작합니다.');
-        const available = safeStorage.isAsyncEncryptionAvailable || safeStorage.isEncryptionAvailable;
-        if (!await available.call(safeStorage)) throw new Error('운영체제의 암호화 저장소를 사용할 수 없어요.');
-        const encrypt = safeStorage.encryptStringAsync || safeStorage.encryptString;
-        encryptedKey = (await encrypt.call(safeStorage, input.apiKey.trim())).toString('base64');
-        nextPlaintext = input.apiKey.trim();
+      const nextData = { ...data }, nextSecrets = { ...secrets };
+      for (const [field, key, clear, pattern, message] of [
+        ['encryptedKey','apiKey','clearKey',/^sk-ant-[\w-]{12,}$/, 'Claude API 키 형식을 확인해 주세요. sk-ant-로 시작합니다.'],
+        ['encryptedElevenLabsKey','elevenLabsApiKey','clearElevenLabsKey',/^[\w-]{20,256}$/, 'ElevenLabs API 키 형식을 확인해 주세요.']
+      ]) {
+        if (input[clear] === true) { nextData[field] = ''; nextSecrets[field] = ''; }
+        else if (typeof input[key] === 'string' && input[key].trim()) {
+          if (!pattern.test(input[key].trim())) throw new Error(message);
+          const available = safeStorage.isAsyncEncryptionAvailable || safeStorage.isEncryptionAvailable;
+          if (!await available.call(safeStorage)) throw new Error('운영체제의 암호화 저장소를 사용할 수 없어요.');
+          const encrypt = safeStorage.encryptStringAsync || safeStorage.encryptString;
+          nextData[field] = (await encrypt.call(safeStorage, input[key].trim())).toString('base64');
+          nextSecrets[field] = input[key].trim();
+        }
       }
-      const previousSettings = settings, previousData = data.encryptedKey;
-      settings = next; data.encryptedKey = encryptedKey;
-      try { write(); } catch (error) { settings = previousSettings; data.encryptedKey = previousData; throw error; }
-      plaintext = nextPlaintext;
+      const previousSettings = settings, previousData = data;
+      settings = next; data = nextData;
+      try { write(); } catch (error) { settings = previousSettings; data = previousData; throw error; }
+      Object.assign(secrets, nextSecrets);
       return this.get();
       });
       queue = operation.catch(() => {});

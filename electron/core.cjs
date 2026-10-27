@@ -1,10 +1,19 @@
-const DEFAULTS = Object.freeze({ model: 'claude-sonnet-5-5', roam: true, alwaysOnTop: true, speak: true, speed: 22, scale: 1, startAtLogin: false, nickname: '', systemPrompt: '' });
+const DEFAULTS = Object.freeze({ model: 'claude-sonnet-5-5', roam: true, alwaysOnTop: true, speak: true, speed: 22, scale: 1, startAtLogin: false, nickname: '', systemPrompt: '', speechProvider: 'windows', elevenLabsVoiceId: '', elevenLabsVoiceName: '', elevenLabsModel: 'eleven_v4', voiceStability: 0.4 });
 const SYSTEM_PROMPT = `당신은 바탕화면을 산책하는 작은 동료 '박주임'입니다. 한국어로 자연스럽고 따뜻한 존댓말을 사용합니다. 과한 감탄이나 이모지는 피하고, 기본 답변은 짧고 실용적인 2~5문장으로 합니다. 사회복지 실무, 글쓰기, 일상 업무를 함께 고민합니다. 사용자가 길게 설명해 달라고 하면 충분히 설명합니다. 실제 인물이나 기관의 직원인 척하지 않습니다. 컴퓨터 화면, 파일, 마이크를 스스로 보고 듣거나 조작할 수 있다고 말하지 않습니다. 사용자가 입력한 메시지만 볼 수 있습니다. 개인정보 입력을 먼저 요구하지 않습니다.`;
 function sanitizeSettings(input = {}, previous = DEFAULTS) {
   const result = { ...previous };
   for (const name of ['roam', 'alwaysOnTop', 'speak', 'startAtLogin']) if (typeof input[name] === 'boolean') result[name] = input[name];
-  for (const [name, min, max] of [['speed', 8, 60], ['scale', 0.7, 1.4]]) if (Number.isFinite(input[name])) result[name] = Math.min(max, Math.max(min, input[name]));
-  for (const [name, max] of [['model', 100], ['nickname', 40], ['systemPrompt', 4000]]) if (typeof input[name] === 'string') result[name] = input[name].trim().slice(0, max);
+  for (const [name, min, max] of [['speed', 8, 60], ['scale', 0.7, 1.4], ['voiceStability', 0, 1]]) if (Number.isFinite(input[name])) result[name] = Math.min(max, Math.max(min, input[name]));
+  for (const [name, max] of [['model', 100], ['nickname', 40], ['systemPrompt', 4000], ['elevenLabsVoiceId', 100], ['elevenLabsVoiceName', 120]]) if (typeof input[name] === 'string') result[name] = input[name].trim().slice(0, max);
+  if (input.speechProvider !== undefined) {
+    if (!['windows', 'elevenlabs'].includes(input.speechProvider)) throw new Error('음성 서비스를 확인해 주세요.');
+    result.speechProvider = input.speechProvider;
+  }
+  if (input.elevenLabsModel !== undefined) {
+    if (!['eleven_v4','eleven_v3','eleven_flash_v2_5','eleven_multilingual_v2'].includes(input.elevenLabsModel)) throw new Error('음성 모델을 확인해 주세요.');
+    result.elevenLabsModel = input.elevenLabsModel;
+  }
+  if (result.elevenLabsVoiceId && !/^[a-zA-Z0-9_-]+$/.test(result.elevenLabsVoiceId)) throw new Error('목소리 ID를 확인해 주세요.');
   if (!/^[a-zA-Z0-9._-]+$/.test(result.model)) throw new Error('모델 ID를 확인해 주세요.');
   return result;
 }

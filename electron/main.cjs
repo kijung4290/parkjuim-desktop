@@ -9,7 +9,12 @@ const { createUpdateController, getUpdateMode } = require('./updater.cjs');
 const { createWalker } = require('./movement.cjs');
 const { isPetRegion } = require('./interaction.cjs');
 const { createStartupController } = require('./startup.cjs');
-const smoke = process.argv.includes('--smoke-test');
+const { createElevenLabs, SAMPLE_TEXT } = require('./elevenlabs.cjs');
+const { randomUUID } = require('node:crypto');
+const voiceSmoke = process.argv.includes('--voice-smoke-test');
+const smoke = process.argv.includes('--smoke-test') || voiceSmoke;
+// Local onboarding credentials are development-only and never bundled.
+if (!app.isPackaged && !smoke) require('dotenv').config({ path:path.join(__dirname,'../.env.local'), quiet:true });
 const smokeRoot = app.isPackaged ? path.join(path.dirname(app.getPath('exe')), '.preview') : path.join(__dirname, '../.preview');
 if (smoke) app.setPath('userData', path.join(smokeRoot, 'smoke-data'));
 protocol.registerSchemesAsPrivileged([{ scheme: 'park', privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
@@ -21,8 +26,9 @@ let pointerOverride = smoke ? {x:-999999,y:-999999} : null;
 const walker = createWalker();
 let motion = {walkDistance:0,walkSpeed:0,offsetX:0,offsetY:0};
 let isQuitting = false;
-let updates, startup;
-const currentSettings = () => ({ ...store.get(), ...startup.get() });
+let updates, startup, elevenLabs, cloudSpeech;
+const environmentKey = () => smoke ? '' : process.env.ELEVENLABS_API_KEY || '';
+const currentSettings = () => ({ ...store.get(), ...startup.get(), hasElevenLabsKey:!!(store.elevenLabsKey() || environmentKey()), elevenLabsKeySource:store.elevenLabsKey() ? 'saved' : environmentKey() ? 'environment' : '' });
 const petSize = () => ({ width: Math.round(194 * settings.scale), height: Math.round(250 * settings.scale) });
 function emit(win, channel, data) { if (win && !win.isDestroyed()) win.webContents.send(channel, data); }
 function broadcast(channel, data) { emit(pet, channel, data); emit(chat, channel, data); }
@@ -111,7 +117,7 @@ async function updateSettings(input) {
   const bounds = pet.getBounds(), area = screen.getDisplayMatching(bounds).workArea;
   pet.setPosition(...Object.values(clampPosition(bounds, area, bounds))); placeChat();
   walker.reset(pet.getBounds(),Date.now(),2500);updatePetPointer();
-  if (!settings.speak) silence();
+  if (!settings.speak || ['speechProvider','elevenLabsVoiceId','elevenLabsModel','voiceStability','elevenLabsApiKey','clearElevenLabsKey'].some(field => Object.hasOwn(input,field))) silence();
   broadcast('settings:changed', settings); return settings;
 }
 function wander() {
@@ -134,7 +140,41 @@ function wander() {
   if(moving||wasMoving!==moving)petState();
 }
 function voiceStop() { if (voiceProcess) { voiceProcess.kill(); voiceProcess = null; } emit(chat, 'voice:event', { type: 'stopped' }); }
-function silence() { if (speechProcess) { speechProcess.kill(); speechProcess = null; } petState({ speaking: false }); }
+function silence(notify = true) {
+  if (speechProcess) { speechProcess.kill(); speechProcess = null; }
+  if (cloudSpeech) { cloudSpeech.controller.abort(); clearTimeout(cloudSpeech.timer); cloudSpeech = null; }
+  if (notify) emit(chat,'voice:event',{type:'silence'});
+  emit(chat,'voice:event',{type:'speech-state',state:'idle'});
+  petState({ speaking: false });
+}
+async function speak(text, previewSettings) {
+  silence(false);
+  if (!chat.isVisible() || (!previewSettings && !settings.speak)) return {cancelled:true};
+  if (typeof text !== 'string' || !text.trim()) return {cancelled:true};
+  if (previewSettings || settings.speechProvider === 'elevenlabs') {
+    const request = { id:randomUUID(), controller:new AbortController(), timer:null };
+    cloudSpeech = request;
+    request.timer=setTimeout(()=>{if(cloudSpeech===request){silence();emit(chat,'voice:event',{type:'error',message:'음성 생성 시간이 길어졌어요. 다시 듣기를 눌러 주세요.'});}},90000);
+    emit(chat,'voice:event',{type:'speech-state',state:'generating'});
+    try {
+      const audio = await elevenLabs.synthesize(text, previewSettings || settings, request.controller.signal);
+      if (cloudSpeech !== request || request.controller.signal.aborted || !chat.isVisible()) return {cancelled:true};
+      // Release busy state if the renderer never acknowledges playback.
+      clearTimeout(request.timer);
+      request.timer = setTimeout(() => { if (cloudSpeech === request) silence(); }, 20000);
+      return { id:request.id, audio:new Uint8Array(audio), mime:'audio/mpeg' };
+    } catch (error) {
+      if (cloudSpeech !== request || request.controller.signal.aborted) return {cancelled:true};
+      silence(); throw error;
+    }
+  }
+  speechProcess = speechTask('speak', text.slice(0, 8000)); const proc = speechProcess;
+  petState({ speaking: true }); emit(chat,'voice:event',{type:'speech-state',state:'playing'});
+  proc.on('error', () => { if(speechProcess===proc)silence(); emit(chat, 'voice:event', { type: 'error', message: '답변 읽기를 시작하지 못했어요.' }); });
+  proc.stdout.setEncoding('utf8'); proc.stdout.on('data', chunk => { try { const event = JSON.parse(chunk.trim()); if (event.type === 'error') emit(chat, 'voice:event', event); } catch {} });
+  proc.on('close', () => { if (speechProcess === proc) { speechProcess = null; petState({ speaking: false }); emit(chat,'voice:event',{type:'silence'}); } });
+  return {native:true};
+}
 function speechTask(mode, text) {
   if (process.platform !== 'win32') throw new Error('이 버전의 음성 기능은 Windows에서 사용할 수 있어요.');
   if (!['listen','speak','dictate','probe'].includes(mode)) throw new Error('잘못된 음성 요청입니다.');
@@ -205,16 +245,19 @@ function registerIpc() {
     proc.on('error', () => emit(chat, 'voice:event', {type:'error',message:'Windows 음성 입력을 열지 못했어요. 입력창에서 Win+H를 눌러 주세요.'}));
     return {ok:true};
   });
-  handle('voice:silence', 'chat', silence);
-  handle('voice:speak', 'chat', text => {
-    silence(); if (!settings.speak || typeof text !== 'string' || !text.trim()) return;
-    speechProcess = speechTask('speak', text.slice(0, 8000)); const proc = speechProcess;
-    petState({ speaking: true });
-    proc.on('error', () => { petState({ speaking: false }); emit(chat, 'voice:event', { type: 'error', message: '답변 읽기를 시작하지 못했어요.' }); });
-    proc.stdout.setEncoding('utf8'); proc.stdout.on('data', chunk => { try { const event = JSON.parse(chunk.trim()); if (event.type === 'error') emit(chat, 'voice:event', event); } catch {} });
-    proc.on('close', () => { if (speechProcess === proc) { speechProcess = null; petState({ speaking: false }); } });
+  handle('voice:silence', 'chat', () => silence(false));
+  handle('voice:speak', 'chat', text => speak(text));
+  handle('voice:voices', 'chat', input => elevenLabs.voices(input));
+  handle('voice:preview', 'chat', input => speak(SAMPLE_TEXT, input || {}));
+  on('voice:playback','chat',(id,state) => {
+    if (id !== cloudSpeech?.id || !['playing','ended','error'].includes(state)) return;
+    if (state === 'playing') {
+      const request=cloudSpeech; clearTimeout(request.timer);
+      request.timer=setTimeout(()=>{if(cloudSpeech===request)silence();},15*60*1000);
+      petState({speaking:true}); emit(chat,'voice:event',{type:'speech-state',state:'playing'});
+    } else silence();
   });
-  handle('link:open', 'chat', name => { const url = { console: 'https://platform.claude.com/settings/keys', speech: 'ms-settings:speech', releases: 'https://github.com/kijung4290/parkjuim-desktop/releases/latest' }[name]; if (url) return shell.openExternal(url); });
+  handle('link:open', 'chat', name => { const url = { console: 'https://platform.claude.com/settings/keys', elevenlabs:'https://elevenlabs.io/app/settings/api-keys', voices:'https://elevenlabs.io/app/voice-library', speech: 'ms-settings:speech', releases: 'https://github.com/kijung4290/parkjuim-desktop/releases/latest' }[name]; if (url) return shell.openExternal(url); });
 }
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
@@ -233,6 +276,7 @@ else {
     const mode = smoke ? 'development' : getUpdateMode({ packaged:app.isPackaged, platform:process.platform, portable:!!process.env.PORTABLE_EXECUTABLE_FILE, executable:app.getPath('exe') });
     startup = createStartupController({ app, mode });
     store = await createStore(app.getPath('userData'), safeStorage); settings = currentSettings();
+    elevenLabs = createElevenLabs({ key:() => store.elevenLabsKey() || environmentKey(), allowEnvironment:!smoke });
     pet = secureWindow({ ...petSize(), transparent: true, skipTaskbar: true, hasShadow: false, title: '박주임 미니미' });
     chat = secureWindow({ width: 380, height: 490, transparent: true, hasShadow: false, skipTaskbar: true, title: '박주임과 대화' });
     pet.setAlwaysOnTop(settings.alwaysOnTop, 'floating'); chat.setAlwaysOnTop(settings.alwaysOnTop, 'floating');
@@ -243,7 +287,7 @@ else {
     updates = createUpdateController({
       updater: mode === 'installed' ? require('electron-updater').autoUpdater : null,
       mode, version:app.getVersion(), notify:state=>broadcast('update:state',state),
-      isBusy:()=>!!(activeRequest || voiceProcess || speechProcess)
+      isBusy:()=>!!(activeRequest || voiceProcess || speechProcess || cloudSpeech)
     });
     registerIpc();
     await Promise.all([pet.loadURL('park://app/pet.html'), chat.loadURL('park://app/chat.html')]);
@@ -313,7 +357,10 @@ else {
         const dir = smokeRoot; fs.mkdirSync(dir, { recursive: true });
         fs.writeFileSync(path.join(dir, 'pet.png'), (await pet.webContents.capturePage()).toPNG());
         fs.writeFileSync(path.join(dir, 'chat.png'), (await chat.webContents.capturePage()).toPNG());
-        const chatTest = await chat.webContents.executeJavaScript('window.__smokeTest()');
+        const chatTest = await chat.webContents.executeJavaScript('window.__smokeTest(true)');
+        await chat.webContents.executeJavaScript('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(true))))');
+        fs.writeFileSync(path.join(dir,'settings.png'),(await chat.webContents.capturePage()).toPNG());
+        await chat.webContents.executeJavaScript("document.querySelector('#back-chat').click()");
         const keyState = await chat.webContents.executeJavaScript('window.park.settings()');
         if (chatTest !== true || !keyState.model) throw new Error('Chat bridge check failed');
         const missingKey = await chat.webContents.executeJavaScript('window.park.send("smoke-no-key", [{role:"user",content:"test"}])');
@@ -332,7 +379,38 @@ else {
           proc.on('error',error=>{clearTimeout(timeout);reject(error);});
           proc.on('close',code=>{clearTimeout(timeout);try{const parsed=JSON.parse(output.trim());if(code!==0||parsed.type!=='capabilities')throw new Error(output);resolve(parsed);}catch(error){reject(error);}});
         });
-        const result={...state,chatTest,nativeClick:true,repeatClick:true,dragDoesNotChat:true,nativeHitRecovery:true,essentialGait:true,reducedMotion:walkState.reduced,roaming:true,hoverPause:true,chatPause:true,encryptedKey:true,missingKeyGuard:true,speechHelper:true,capabilities,model:keyState.model,pet:pet.getBounds(),chat:chat.getBounds()};
+        let voicePlayback = null;
+        if (voiceSmoke) {
+          // Reuse the ONE authorized live sample, so renderer regression tests
+          // exercise decoding and IPC without spending more API credits.
+          const sampleDir=path.join(__dirname,'../.preview/elevenlabs');
+          const sample=fs.readFileSync(path.join(sampleDir,'sample.mp3'));
+          const sampleResult=JSON.parse(fs.readFileSync(path.join(sampleDir,'result.json'),'utf8'));
+          const config=sampleResult.config;
+          let observedConfig;
+          elevenLabs={voices:async()=>({voices:[{id:config.elevenLabsVoiceId,name:config.elevenLabsVoiceName,description:'한국어 미리듣기 검사',korean:false}],nextPageToken:''}),synthesize:async(_text,input)=>{observedConfig=input;return sample;}};
+          await store.save({...config,speechProvider:'elevenlabs',elevenLabsApiKey:'sk-test-voice-key-1234567890'});
+          settings=currentSettings();broadcast('settings:changed',settings);showChat('settings');
+          await chat.webContents.executeJavaScript(`new Promise(resolve=>setTimeout(resolve,300))`);
+          voicePlayback=await chat.webContents.executeJavaScript(`(async()=>{
+            const wait=async fn=>{for(let i=0;i<300;i++){if(fn())return;await new Promise(r=>setTimeout(r,50));}throw new Error('Voice UI timed out: '+JSON.stringify(window.__speechTestState())+' '+document.querySelector('#voice-feedback').textContent);};
+            await wait(()=>document.querySelector('#voice-choice').options.length>1);
+            document.querySelector('#voice-stability').value='0.6';
+            document.querySelector('#settings-form').requestSubmit();
+            await wait(()=>document.querySelector('#settings-feedback').textContent.includes('저장했어요'));
+            document.querySelector('#preview-voice').scrollIntoView({block:'center'});
+            document.querySelector('#preview-voice').click();
+            await wait(()=>window.__speechTestState().started>0);
+            const playing=window.__speechTestState();
+            if(!playing.active||!(playing.duration>1))throw new Error('HTML audio playback did not start');
+            await wait(()=>window.__speechTestState().ended>0);
+            return {...window.__speechTestState(),saved:document.querySelector('#voice-choice').value};
+          })()`);
+          if(store.get().voiceStability!==.6||observedConfig?.voiceStability!==.6||cloudSpeech)throw new Error('Voice config or playback lifecycle failed');
+          fs.writeFileSync(path.join(dir,'voice-settings.png'),(await chat.webContents.capturePage()).toPNG());
+          await store.save({clearElevenLabsKey:true});
+        }
+        const result={...state,chatTest,nativeClick:true,repeatClick:true,dragDoesNotChat:true,nativeHitRecovery:true,essentialGait:true,reducedMotion:walkState.reduced,roaming:true,hoverPause:true,chatPause:true,encryptedKey:true,missingKeyGuard:true,speechHelper:true,voicePlayback,capabilities,model:keyState.model,pet:pet.getBounds(),chat:chat.getBounds()};
         fs.writeFileSync(path.join(dir,'result.json'),JSON.stringify(result,null,2));
         console.log('SMOKE PASS', JSON.stringify(result));
         app.exit(0);

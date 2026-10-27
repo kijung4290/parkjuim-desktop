@@ -45,10 +45,28 @@ Windows의 ‘동작 줄이기’가 켜져 있어도 이동을 표현하는 기
 
 ## 음성
 
-추가 음성 API 비용 없이 Windows `System.Speech`를 사용합니다.
+설정의 **박주임의 목소리**에서 ElevenLabs와 Windows 기본 음성 중 선택할 수 있습니다. 기존 사용자의 Windows 음성 설정은 유지합니다.
+
+### ElevenLabs로 자연스럽게 읽기
+
+1. 설정 상단의 **박주임의 목소리**에서 ElevenLabs API 키를 입력하고 **연결하기**를 누릅니다. 키는 Windows 계정으로 암호화해 저장하며 렌더러에 돌려주지 않습니다. Claude 키와 따로 관리하고 삭제할 수 있습니다.
+2. 목소리를 불러와 선택하고 **한국어 미리듣기**로 들어 보세요. 이름·설명 검색, 다음 페이지 불러오기, 한국어로 표시된 목소리 우선 정렬을 지원합니다. 원하는 목소리가 없다면 **내 목소리에 추가하기**에서 ElevenLabs 라이브러리의 음성을 계정에 추가한 뒤 다시 불러오세요. 계정·요금제에 따라 사용 가능한 목소리가 달라집니다.
+3. 음성 모델과 말투의 안정감을 고르고 **설정 저장**을 누르면 이후 답변을 해당 목소리로 읽습니다. Eleven v4를 기본 모델로 제공하며 v3, Flash v2.5, Multilingual v2도 선택할 수 있습니다. **그만 읽기**나 대화창 닫기로 생성과 재생을 중지할 수 있습니다.
+
+ElevenLabs 답변 읽기와 미리듣기는 텍스트를 ElevenLabs로 전송하며 API 크레딧을 사용합니다. 마이크 음성 입력은 기존 Windows 방식을 유지합니다. 생성된 음성은 메모리에서 재생하며 일반 사용 중에는 음성 파일을 디스크에 저장하지 않습니다. 생성·재생 중에는 즉시 업데이트 재시작을 막습니다.
+
+개발 환경은 `npx -y @elevenlabs/cli@latest onboard init`으로 연결한 `.env.local`을 메인 프로세스에서만 읽습니다. 공식 `@elevenlabs/elevenlabs-js` SDK를 사용하며 SDK의 `ELEVENLABS_API_KEY` 환경 변수와 앱에 암호화한 키를 지원합니다. `.env.local`과 개인 설정은 Git 및 설치 파일에서 제외합니다. 배포받은 사용자는 자신의 키를 설정합니다.
+
+API 참고: [목소리 목록](https://elevenlabs.io/docs/api-reference/voices/search), [음성 생성](https://elevenlabs.io/docs/api-reference/text-to-speech/convert).
+
+`npm run verify:voice`는 실제 계정의 목소리 조회만 검사합니다. 실제 생성 검사를 명시적으로 허용한 경우 `node scripts/verify-elevenlabs.cjs --generate`로 짧은 한국어 샘플 한 개를 생성할 수 있습니다. 샘플은 Git에서 제외한 `.preview/elevenlabs/`에 저장합니다. 이후 `npm run smoke:voice`는 그 샘플을 재사용해 추가 크레딧 없이 설정 저장·IPC·HTML 오디오 재생을 검사합니다.
+
+### Windows 음성 입력과 기본 읽기
+
+Windows `System.Speech`를 사용하며 별도 ElevenLabs 크레딧을 사용하지 않습니다.
 
 - **말로 입력**: 마이크 버튼을 누르면 한국어를 인식해 입력창에 적습니다. 내용을 확인하고 전송합니다. 상시 녹음이나 호출어 감지는 하지 않습니다.
-- **답변 읽기**: Windows에 설치된 한국어 TTS 음성으로 읽습니다. 대화창에서 끄거나 중간에 멈출 수 있습니다.
+- **Windows 답변 읽기**: Windows에 설치된 한국어 TTS 음성으로 읽습니다. 대화창에서 끄거나 중간에 멈출 수 있습니다.
 - Windows 언어/음성 팩이 있어도 **System.Speech와 호환되는 한국어 인식기·TTS 음성이 없는 PC가 있습니다.** 이때 앱이 지원 상태를 안내합니다. 한국어 음성 인식기가 없으면 마이크 버튼이 **Windows 음성 입력(Win+H)** 으로 연결합니다. 열리지 않으면 입력창에서 Win+H를 직접 눌러 주세요. Windows 음성 입력의 인터넷 연결·개인정보 처리는 Windows 설정에 따릅니다.
 - 마이크 오류가 나면 Windows의 마이크 개인정보 권한과 기본 녹음 장치를 확인하세요. 실제 녹음/스피커 동작은 대상 PC에서 확인해야 합니다.
 
@@ -97,6 +115,9 @@ git push origin main --follow-tags
 | `electron/main.cjs` | 투명 창, 산책 이동, 트레이, Claude 스트리밍, IPC 권한 검사 |
 | `electron/preload.cjs` | 필요한 기능만 노출하는 격리된 브리지 |
 | `electron/store.cjs` | 설정과 암호화된 API 키 저장 |
+| `electron/elevenlabs.cjs` | 공식 SDK로 목소리 조회·한국어 음성 생성 |
+| `renderer/voice-settings.js` | 목소리 선택·미리듣기·키 연결 설정 |
+| `renderer/speech-player.mjs` | 메모리 오디오 재생·중지·자원 정리 |
 | `electron/updater.cjs` | 자동 확인·다운로드·설치 상태 관리 |
 | `electron/speech.ps1` | Windows 한국어 인식 / 답변 읽기 |
 | `renderer/character.js` | 박주임 3D 모델과 애니메이션 |

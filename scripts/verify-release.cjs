@@ -5,6 +5,7 @@ async function main(){
  const root=path.resolve(__dirname,'..'),release=path.join(root,'release');
  const latest=JSON.parse(fs.readFileSync(path.join(release,'latest-build.json'),'utf8'));
  const archive=path.join(release,latest.directory,'win-unpacked/resources/app.asar');
+ assert.ok(!asar.listPackage(archive).some(file=>/^\/?(?:\.env(?:\.|$)|settings\.json$)/.test(file)),'Local credentials must not be packaged');
  for(const directory of ['electron','renderer'])for(const name of fs.readdirSync(path.join(root,directory))){
   if(!/\.(cjs|mjs|js|html|css|ps1|png)$/.test(name))continue;
   const file=`${directory}/${name}`;
