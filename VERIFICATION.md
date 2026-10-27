@@ -7,6 +7,8 @@
 - 비동기 API는 `result` 문자열을 추출하고 기존 동기 API의 문자열 반환도 유지하도록 수정. Claude와 ElevenLabs 모두 적용
 - 단위 테스트 28개 통과. 실제 Electron의 암호화 저장 후 별도 저장소 인스턴스로 다시 열어 양쪽 키가 동일한 문자열로 복원되는 검사 통과
 - 인증·권한·모델·API 크레딧 부족·서버·네트워크·시간 초과를 구분하는 오류 안내 추가
+- [v1.2.1 배포 작업](https://github.com/kijung4290/parkjuim-desktop/actions/runs/40426728060): 검사·28개 테스트·Windows 빌드·패키지 비교·업데이트 해시 검사·Release 공개 통과. 공개 업데이트 엔진으로 설치 파일 다운로드·SHA-512 검증 후 이 PC에 설치
+- 설치된 ASAR의 저장소 코드와 SDK를 직접 사용해 실제 사용자 설정의 Claude·ElevenLabs 키가 문자열로 복원되고 Claude 모델 접근에 성공하는 것 확인. v1.2.1 정상 실행으로 재시작
 
 ## v1.2.0 ElevenLabs 음성 (2026-10-27)
 
