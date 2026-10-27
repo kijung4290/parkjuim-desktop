@@ -23,6 +23,7 @@ async function main(){
  const hash=crypto.createHash('sha512');for await(const chunk of fs.createReadStream(path.join(release,setup)))hash.update(chunk);
  assert.equal(hash.digest('base64'),info.sha512,'Update manifest checksum must match the released installer');
  const config=yaml.load(fs.readFileSync(path.join(release,latest.directory,'win-unpacked/resources/app-update.yml'),'utf8'));
+ for(const module of ['loaders/GLTFLoader.js','utils/BufferGeometryUtils.js','utils/SkeletonUtils.js'])assert.ok(fs.readFileSync(path.join(release,latest.directory,'win-unpacked/resources/three-addons',module)).equals(fs.readFileSync(path.join(root,'node_modules/three/examples/jsm',module))),`Missing or mismatched 3D loader: ${module}`);
  assert.equal(config.provider,'github');assert.equal(config.owner,'kijung4290');assert.equal(config.repo,'parkjuim-desktop');assert.ok(!config.token);
  console.log('UPDATE FEED PASS: installer SHA-512 and GitHub feed configuration verified.');
  console.log('RELEASE PASS: final packaged source matches all Electron and renderer files; setup and portable EXEs are valid.');

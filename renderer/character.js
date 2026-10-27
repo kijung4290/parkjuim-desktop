@@ -1,8 +1,9 @@
 import * as THREE from '/vendor/three.module.js';
 import { legPose, STRIDE_PIXELS } from './gait.mjs';
+import {sanitizeAppearance} from './appearance.mjs';
 
 // A real mesh character: soft clay materials, dimensional curls, independent joints.
-export function createCharacter(scene) {
+export function createCharacter(scene,initialAppearance={}) {
   const root = new THREE.Group(); scene.add(root);
   const material = (color, roughness = .8) => new THREE.MeshStandardMaterial({ color, roughness });
   const skin = material('#f2bf9d', .7), hair = material('#292b27', .78), sweater = material('#74764c'), collar = material('#686b43'), trousers = material('#41473e'), shoes = material('#e9e5d9'), sole = material('#c7c4b6'), ink = material('#272b24', .5), blush = material('#e99989'), white = material('#fffaf0');
@@ -19,19 +20,44 @@ export function createCharacter(scene) {
   for (let i = 0; i < 22; i++) { const a = i / 22 * Math.PI * 2; oval(torso, sweater, [Math.cos(a)*.22,.64,Math.sin(a)*.22], [.009,.125,.009]); }
   const head = new THREE.Group(); head.position.set(0,2.38,0); root.add(head);
   oval(head, skin, [0,0,0], [.65,.67,.5]);
-  oval(head, skin, [-.63,-.04,-.005], [.115,.18,.105]); oval(head, skin, [.63,-.04,-.005], [.115,.18,.105]);
-  oval(head, blush, [-.663,-.035,.076], [.038,.09,.028]); oval(head, blush, [.663,-.035,.076], [.038,.09,.028]);
+  const humanEars=new THREE.Group();head.add(humanEars);
+  oval(humanEars, skin, [-.63,-.04,-.005], [.115,.18,.105]); oval(humanEars, skin, [.63,-.04,-.005], [.115,.18,.105]);
+  oval(humanEars, blush, [-.663,-.035,.076], [.038,.09,.028]); oval(humanEars, blush, [.663,-.035,.076], [.038,.09,.028]);
   // The back cap and deliberately irregular locks preserve Park's curly fringe.
-  oval(head, hair, [0,.25,-.16], [.69,.55,.45]);
+  const hairstyles={curly:new THREE.Group(),short:new THREE.Group(),bob:new THREE.Group()};for(const group of Object.values(hairstyles))head.add(group);
+  oval(hairstyles.curly, hair, [0,.25,-.16], [.69,.55,.45]);
   const locks = [[-.57,.30,.22,.20,.27,.23],[-.42,.52,.28,.25,.24,.24],[-.19,.60,.28,.26,.23,.26],[.08,.60,.26,.25,.24,.26],[.34,.53,.27,.26,.25,.26],[.55,.32,.20,.22,.28,.23],[-.57,.04,.12,.11,.27,.15],[.58,.04,.12,.11,.25,.15],[-.37,.34,.38,.17,.24,.16],[-.12,.38,.41,.17,.22,.17],[.15,.36,.41,.17,.22,.17],[.40,.30,.37,.18,.21,.18]];
-  locks.forEach(([x,y,z,sx,sy,sz],i)=>{ const lock = oval(head,hair,[x,y,z],[sx,sy,sz]); lock.rotation.z = (i%3-1)*.22; });
+  locks.forEach(([x,y,z,sx,sy,sz],i)=>{ const lock = oval(hairstyles.curly,hair,[x,y,z],[sx,sy,sz]); lock.rotation.z = (i%3-1)*.22; });
+  oval(hairstyles.short,hair,[0,.29,-.12],[.66,.47,.44]);
+  for(let i=0;i<5;i++){const lock=oval(hairstyles.short,hair,[-.43+i*.2,.39,.31],[.17,.20,.18]);lock.rotation.z=-.3;}
+  oval(hairstyles.bob,hair,[0,.21,-.18],[.71,.57,.46]);
+  for(const side of [-1,1])oval(hairstyles.bob,hair,[side*.57,-.06,.03],[.19,.48,.29]);
+  for(let i=0;i<5;i++)oval(hairstyles.bob,hair,[-.40+i*.20,.38,.36],[.15,.21,.13]);
+  const cat=new THREE.Group(),rabbit=new THREE.Group(),muzzle=new THREE.Group(),spectacles=new THREE.Group();head.add(cat,rabbit,muzzle,spectacles);
+  const triangle=new THREE.Shape();triangle.moveTo(-.19,0);triangle.lineTo(0,.40);triangle.lineTo(.19,0);triangle.closePath();
+  const earGeometry=new THREE.ExtrudeGeometry(triangle,{depth:.10,bevelEnabled:true,bevelSegments:3,steps:1,bevelSize:.035,bevelThickness:.035});
+  for(const side of [-1,1]){
+    const ear=new THREE.Mesh(earGeometry,skin);ear.position.set(side*.45,.46,-.07);ear.rotation.z=-side*.17;ear.castShadow=true;cat.add(ear);
+    const inner=new THREE.Mesh(earGeometry,blush);inner.scale.set(.55,.6,.25);inner.position.set(side*.45,.50,.052);inner.rotation.z=-side*.17;cat.add(inner);
+    const longEar=oval(rabbit,skin,[side*.28,.88,-.04],[.15,.43,.13]);longEar.rotation.z=-side*.12;
+    const lining=oval(rabbit,blush,[side*.28,.90,.073],[.075,.32,.027]);lining.rotation.z=-side*.12;
+    oval(muzzle,white,[side*.10,-.23,.46],[.14,.11,.085]);
+    for(let i=0;i<3;i++)tube(cat,[[side*.3,-.20+i*.07,.47],[side*.63,-.23+i*.10,.42]],.007,ink);
+    const rim=new THREE.Mesh(new THREE.TorusGeometry(.145,.014,8,32),ink);rim.position.set(side*.225,.015,.515);rim.scale.y=.85;spectacles.add(rim);
+    tube(spectacles,[[side*.37,.03,.50],[side*.58,.04,.25]],.013,ink);
+  }
+  tube(spectacles,[[-.08,.015,.525],[0,.04,.54],[.08,.015,.525]],.012,ink);
+  const catTail=new THREE.Group(),rabbitTail=new THREE.Group();root.add(catTail,rabbitTail);
+  tube(catTail,[[.25,1.04,-.21],[.66,1.02,-.39],[.72,1.43,-.43],[.57,1.51,-.38]],.085,skin);
+  oval(rabbitTail,skin,[0,.98,-.38],[.2,.2,.2]);
   const eyes = new THREE.Group(); head.add(eyes);
-  const eyeL = oval(eyes,ink,[-.225,.015,.476],[.042,.064,.027]);
-  const eyeR = oval(eyes,ink,[.225,.015,.476],[.042,.064,.027]);
+  const eyeMaterial=material('#272b24',.5);
+  const eyeL = oval(eyes,eyeMaterial,[-.225,.015,.476],[.042,.064,.027]);
+  const eyeR = oval(eyes,eyeMaterial,[.225,.015,.476],[.042,.064,.027]);
   oval(eyeL, white, [-.22,.34,.74], [.16,.13,.20]); oval(eyeR, white, [-.22,.34,.74], [.16,.13,.20]);
   tube(head,[[-.32,.175,.462],[-.24,.193,.49],[-.15,.181,.49]],.018,hair);
   tube(head,[[.15,.181,.49],[.24,.193,.49],[.32,.175,.462]],.018,hair);
-  oval(head,skin,[.007,-.11,.498],[.058,.088,.073]);
+  const nose=oval(head,skin,[.007,-.11,.498],[.058,.088,.073]);
   oval(head,blush,[-.39,-.15,.409],[.092,.042,.013]); oval(head,blush,[.39,-.15,.409],[.092,.042,.013]);
   const smile = tube(head,[[-.17,-.275,.445],[-.09,-.316,.475],[.02,-.325,.482],[.13,-.294,.46]],.012,ink);
   const mouth = oval(head,ink,[0,-.31,.478],[.075,.024,.012]); mouth.visible = false;
@@ -56,8 +82,21 @@ export function createCharacter(scene) {
   }
   let state = { moving:false,direction:1,chatting:false,thinking:false,speaking:false,walkDistance:0,scale:1 }, pointer={x:0,y:0},nextBlink=2.3,blinkStart=-10,waveUntil=0,walkBlend=0,gaitDistance=0;
   const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let appearance;
+  function setAppearance(input){
+    appearance=sanitizeAppearance(input,appearance);const animal=appearance.characterType!=='human';
+    skin.color.set(animal?appearance.hairColor:appearance.skinColor);hair.color.set(appearance.hairColor);sweater.color.set(appearance.outfitColor);collar.color.set(appearance.outfitColor).multiplyScalar(.88);trousers.color.set(appearance.pantsColor);
+    eyeMaterial.color.set(animal&&(skin.color.r+skin.color.g+skin.color.b)<.35?'#e7cc85':'#272b24');
+    humanEars.visible=!animal;for(const [id,group]of Object.entries(hairstyles))group.visible=!animal&&id===appearance.hairStyle;
+    cat.visible=catTail.visible=appearance.characterType==='cat';rabbit.visible=rabbitTail.visible=appearance.characterType==='rabbit';muzzle.visible=animal;spectacles.visible=appearance.glasses;
+    head.scale.setScalar(animal?.90:1);head.position.y=animal?2.30:2.38;nose.material=animal?blush:skin;nose.scale.set(...(animal?[.058,.043,.05]:[.058,.088,.073]));
+    nose.position.z=animal?.56:.498;smile.position.z=animal?.10:0;mouth.position.z=animal?.58:.478;
+  }
+  setAppearance(initialAppearance);
   return {
     root,
+    setAppearance,
+    inspectAppearance:()=>({...appearance}),
     setState(input) { if (input.chatting && !state.chatting) waveUntil = performance.now()/1000+1.1; state={...state,...input}; },
     look(x,y) { pointer={x,y}; },
     wave() { waveUntil=performance.now()/1000+1.4; },

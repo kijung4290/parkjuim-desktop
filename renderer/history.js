@@ -9,7 +9,7 @@ export function createHistory({bridge,onOpen,onNew}){
     $('#open-history').disabled=busy;$('#history-new').disabled=busy||loading;$('#history-count').textContent=`${items.length}/50`;
     list.replaceChildren();const query=$('#history-search').value.trim().toLocaleLowerCase();
     const visible=items.filter(record=>`${record.title} ${labels[record.provider]} ${record.model}`.toLocaleLowerCase().includes(query));
-    $('#history-empty').hidden=!!visible.length;$('#history-empty').textContent=query?'이름에 맞는 대화가 없어요.':'박주임과 나눈 대화가 여기에 차곡차곡 모여요.';
+    $('#history-empty').hidden=!!visible.length;$('#history-empty').textContent=query?'이름에 맞는 대화가 없어요.':'함께 나눈 대화가 여기에 차곡차곡 모여요.';
     for(const record of visible){
       const row=document.createElement('article');row.className=`history-item${record.id===activeId?' current':''}`;row.dataset.id=record.id;
       const open=button('','history-open',async()=>operate(async()=>{const result=await bridge.historyOpen(record.id);if(result?.error)throw new Error(result.error);await onOpen(result);close(true);}));

@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ko"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self' blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'"><title>박주임과 대화</title><link rel="stylesheet" href="chat.css"><link rel="stylesheet" href="voice.css"><link rel="stylesheet" href="attachments.css"><link rel="stylesheet" href="history.css"></head>
+<html lang="ko"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'"><title>박주임과 대화</title><link rel="stylesheet" href="chat.css"><link rel="stylesheet" href="voice.css"><link rel="stylesheet" href="attachments.css"><link rel="stylesheet" href="history.css"><link rel="stylesheet" href="character-settings.css"></head>
 <body><link rel="stylesheet" href="updates.css">
 <svg class="icon-definitions" xmlns="http://www.w3.org/2000/svg"><defs>
 <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6"/></symbol>
@@ -17,12 +17,12 @@
 </defs></svg>
 <main class="window">
   <header class="topbar">
-    <div class="identity"><div class="avatar"><img src="reference.png" alt=""><i></i></div><div><strong>박주임<span class="tag">미니미</span></strong><span class="presence" id="presence">곁에 있어요</span></div></div>
+    <div class="identity"><div class="avatar"><img src="reference.png" alt=""><i></i></div><div><strong><span id="character-label">박주임</span><span class="tag">미니미</span></strong><span class="presence" id="presence">곁에 있어요</span></div></div>
     <nav class="window-actions" aria-label="대화 메뉴"><button class="icon-button" id="open-history" title="대화 목록" aria-label="대화 목록 열기"><svg><use href="#i-history"/></svg></button><button class="icon-button" id="new-chat" title="새 대화" aria-label="새 대화"><svg><use href="#i-plus"/></svg></button><button class="icon-button" id="open-settings" title="설정" aria-label="설정 열기"><svg><use href="#i-settings"/></svg></button><button class="icon-button" id="close-chat" title="접어 두기" aria-label="대화창 닫기"><svg><use href="#i-close"/></svg></button></nav>
   </header>
   <section id="conversation" class="conversation" aria-label="대화 내용" tabindex="0">
     <div id="welcome" class="welcome"><div class="welcome-illustration"><span class="orbit orbit-one"></span><span class="orbit orbit-two"></span><img src="reference.png" alt="카키색 니트를 입은 박주임"><span class="little-note">잠깐, 쉬어 가요.</span></div><p class="eyebrow">당신의 작은 바탕화면 동료</p><h1>불렀어요?<br>무엇부터 같이 할까요.</h1><p class="welcome-copy">정리 안 된 생각도, 소소한 이야기도 좋아요.</p><div class="suggestions"><button data-prompt="오늘 할 일이 많아서 막막해요. 같이 우선순위를 정리해 주세요."><span>↗</span>할 일 정리</button><button data-prompt="제가 쓴 글을 자연스럽게 다듬는 걸 도와주세요."><span>✎</span>글 다듬기</button><button data-prompt="잠깐 쉬면서 이야기 나누고 싶어요."><span>☁</span>잠깐 수다</button></div></div>
-    <div id="messages" role="log" aria-label="박주임과 나눈 대화" aria-live="polite" aria-relevant="additions"></div>
+    <div id="messages" role="log" aria-label="함께 나눈 대화" aria-live="polite" aria-relevant="additions"></div>
   </section>
   <div id="update-banner" class="update-banner" role="status" hidden><span id="update-banner-text"></span><button id="update-now" type="button">지금 업데이트</button></div>
   <div id="notice" class="notice" role="status" hidden></div>
@@ -32,19 +32,31 @@
     <div class="composer-tools"><button id="attach-file" class="composer-tool" type="button" title="PDF·이미지·텍스트·Word·Excel 첨부"><svg><use href="#i-attach"/></svg>파일 첨부</button><button id="toggle-search" class="composer-tool" type="button" aria-pressed="false" title="웹 검색을 켜면 필요할 때 검색해요. 추가 API 검색 사용료가 발생할 수 있어요."><svg><use href="#i-web"/></svg>웹 검색</button><span id="attachment-count" class="attachment-count">파일당 최대 6MB</span></div>
     <div id="attachment-list" class="attachment-list" aria-label="보낼 첨부 파일" hidden></div><p id="attachment-note" class="attachment-note" hidden>보내면 파일 내용이 선택한 AI로 전송돼요. Word·Excel은 텍스트·표 값을 읽어요.</p>
     <div class="input-row"><textarea id="message" aria-label="박주임에게 할 말" placeholder="박주임, 있잖아요…" rows="1" maxlength="12000"></textarea><button type="submit" class="send-button" id="send" title="보내기" aria-label="메시지 보내기"><svg><use href="#i-send"/></svg></button></div><div class="composer-bottom"><button type="button" id="microphone" class="voice-button" aria-label="음성 입력 시작" aria-pressed="false"><svg><use href="#i-mic"/></svg><span id="mic-label">말로 입력</span></button><button type="button" id="toggle-speech" class="voice-button" aria-label="답변 읽기 켜기 또는 끄기" aria-pressed="true"><svg><use href="#i-sound"/></svg><span>답변 읽기</span></button><span class="input-hint">Enter로 보내기</span></div></form>
-  <footer class="footnote">Claude와 함께하는 박주임 · 대화는 이 실행 중에만 기억해요</footer>
+  <footer class="footnote">대화를 이 PC에 암호화해 저장해요</footer>
   <section id="history-panel" class="history-panel" aria-label="대화 목록" hidden>
     <header class="history-header"><button id="close-history" class="icon-button" type="button" aria-label="대화로 돌아가기"><svg><use href="#i-back"/></svg></button><h2>대화 목록</h2><small id="history-count">0/50</small></header>
     <label class="history-search"><input id="history-search" type="search" placeholder="대화 이름이나 AI 서비스로 찾기" aria-label="대화 목록 검색" maxlength="100"></label>
     <p class="history-caption">대화 텍스트를 이 PC에 암호화해 저장해요.<br>첨부 파일의 원본은 보관하지 않아요.</p>
-    <p id="history-empty" class="history-empty">박주임과 나눈 대화가 여기에 모여요.</p><div id="history-list" class="history-list" aria-label="저장된 대화"></div>
+    <p id="history-empty" class="history-empty">함께 나눈 대화가 여기에 모여요.</p><div id="history-list" class="history-list" aria-label="저장된 대화"></div>
     <div class="history-footer"><p id="history-feedback" class="settings-feedback" role="status"></p><button id="history-new" class="save-button" type="button"><svg><use href="#i-plus"/></svg>새 대화 시작</button></div>
   </section>
-  <section id="settings-panel" class="settings-panel" aria-label="박주임 설정" hidden>
-    <header class="settings-header"><button class="icon-button" id="back-chat" aria-label="대화로 돌아가기"><svg><use href="#i-back"/></svg></button><h2>박주임 설정</h2><span>나에게 맞게, 조금씩.</span></header>
+  <section id="settings-panel" class="settings-panel" aria-label="미니미 설정" hidden>
+    <header class="settings-header"><button class="icon-button" id="back-chat" aria-label="대화로 돌아가기"><svg><use href="#i-back"/></svg></button><h2>미니미 설정</h2><span>나에게 맞게, 조금씩.</span></header>
     <form id="settings-form" class="settings-form">
+      <section class="character-settings" aria-label="나만의 캐릭터">
+        <span class="section-label">나만의 캐릭터</span>
+        <label class="field">캐릭터 이름<input id="character-name" type="text" maxlength="40" autocomplete="off" placeholder="예: 박주임, 모찌, 루루"><small>20자까지 설정해요. 나를 부르는 이름은 아래 대화 취향에서 따로 정해요.</small></label>
+        <label class="field">3D 캐릭터<select id="character-type"><option value="human">사람 · 작은 동료</option><option value="cat">고양이 · 느긋한 산책 친구</option><option value="rabbit">토끼 · 포근한 말벗</option><option value="custom">직접 추가한 3D 캐릭터</option></select></label>
+        <div class="custom-character-settings"><div class="field-actions"><button id="character-import" class="text-button" type="button">내 GLB 캐릭터 추가</button><button id="character-delete" class="text-button danger" type="button" hidden>보관함에서 삭제</button></div><label id="custom-character-field" class="field" hidden>내 3D 캐릭터<select id="custom-character"><option value="">GLB 파일을 추가해 주세요</option></select></label><label id="character-rotation-field" class="field range-field" hidden>모델 정면 방향 <output id="character-rotation-value">0°</output><input id="character-rotation" type="range" min="0" max="360" step="15" value="0"></label><p id="character-model-feedback" class="settings-feedback" role="status">GLB 파일은 이 PC에 복사해 보관해요. 최대 20MB, 텍스처 포함·압축 해제 상태로 선택해 주세요.</p></div>
+        <div class="character-preview-stage"><canvas id="character-preview" aria-label="선택한 캐릭터의 3D 미리보기"></canvas><p id="character-preview-fallback" hidden>미리보기를 표시할 수 없어요.<br>설정은 저장할 수 있어요.</p><strong id="character-preview-name">박주임</strong><small>미리보기 · 저장하면 바탕화면에 적용돼요</small></div>
+        <label class="field">머리 모양<select id="character-hair"><option value="curly">몽글몽글 곱슬머리</option><option value="short">단정한 짧은 머리</option><option value="bob">둥근 단발머리</option></select></label>
+        <div class="character-colors"><label class="field">피부 색<input id="character-skin" type="color"></label><label class="field"><span id="character-color-label">머리 색</span><input id="character-fur" type="color"></label><label class="field">니트 색<input id="character-outfit" type="color"></label><label class="field">바지 색<input id="character-pants" type="color"></label></div>
+        <label class="toggle-row"><span><strong>동그란 안경</strong><small>캐릭터에 안경을 씌워요.</small></span><input id="character-glasses" type="checkbox" role="switch"><span class="switch" aria-hidden="true"></span></label>
+        <div class="field-actions"><button id="character-reset" class="text-button" type="button">기본 박주임으로 되돌리기</button></div>
+        <p class="privacy-note">이 Windows 사용자 계정에 저장해요. 이름은 대화창과 AI의 자기소개에도 반영돼요. 내장 캐릭터를 꾸미거나 GLB 파일을 추가할 수 있어요.</p>
+      </section><div class="section-divider"></div>
       <span class="section-label">시작 설정</span>
-      <label class="toggle-row"><span><strong>Windows 시작 시 자동 실행</strong><small>로그인하면 대화창 없이 박주임만 나타나요.</small></span><input id="setting-start" type="checkbox" role="switch" aria-describedby="startup-status"><span class="switch" aria-hidden="true"></span></label>
+      <label class="toggle-row"><span><strong>Windows 시작 시 자동 실행</strong><small>로그인하면 대화창 없이 캐릭터만 나타나요.</small></span><input id="setting-start" type="checkbox" role="switch" aria-describedby="startup-status"><span class="switch" aria-hidden="true"></span></label>
       <p id="startup-status" class="settings-feedback" role="status">변경하면 바로 적용돼요.</p>
       <div class="section-divider"></div>
       <section id="ai-settings" aria-label="대화 AI 설정">
@@ -58,8 +70,8 @@
       <p id="ai-privacy" class="privacy-note"></p>
       </section>
       <div class="section-divider"></div>
-      <section class="voice-settings" aria-label="박주임의 목소리">
-        <div class="settings-intro"><span class="section-label">박주임의 목소리</span><span id="eleven-key-status" class="key-status">연결 전</span></div>
+      <section class="voice-settings" aria-label="답변을 읽을 목소리">
+        <div class="settings-intro"><span class="section-label">답변을 읽을 목소리</span><span id="eleven-key-status" class="key-status">연결 전</span></div>
         <label class="field">답변을 읽을 목소리<select id="speech-provider"><option value="elevenlabs">ElevenLabs · 자연스러운 AI 음성</option><option value="windows">Windows · 기본 음성</option></select></label>
         <label class="field">ElevenLabs API 키<input id="eleven-key" type="password" autocomplete="off" spellcheck="false" maxlength="256" placeholder="ElevenLabs API 키"><small>이 Windows 계정으로 암호화해 저장해요.</small></label>
         <div class="field-actions"><button id="connect-eleven" class="text-button" type="button">연결하기</button><button id="get-eleven-key" class="text-button" type="button">API 키 발급 ↗</button><button id="delete-eleven-key" class="text-button danger" type="button" hidden>저장된 키 삭제</button></div>
@@ -87,7 +99,7 @@
       <label class="field range-field">산책 속도 <output id="speed-value">느긋하게</output><input id="setting-speed" type="range" min="8" max="60" step="1"></label>
       <div class="section-divider"></div><span class="section-label">대화 취향</span>
       <label class="field">나를 부를 이름<input id="nickname" type="text" maxlength="40" placeholder="예: 주영님"></label>
-      <label class="field">박주임에게 미리 알려 둘 것<textarea id="system-prompt" rows="3" maxlength="4000" placeholder="예: 사회복지 업무를 도와주고 답변은 짧게 해 주세요."></textarea></label>
+      <label class="field">캐릭터에게 미리 알려 둘 것<textarea id="system-prompt" rows="3" maxlength="4000" placeholder="예: 사회복지 업무를 도와주고 답변은 짧게 해 주세요."></textarea></label>
       <div class="speech-help"><strong>말로 대화하려면</strong><p>마이크를 누르고 말하면 입력창에 적혀요. 내용을 확인하고 전송하세요. 한국어 인식기가 없다면 입력창에서 <kbd>Win</kbd> + <kbd>H</kbd>로 Windows 음성 입력을 사용할 수 있어요.</p><button type="button" id="speech-settings" class="text-button">Windows 음성 설정 열기 ↗</button></div>
       <p id="settings-feedback" role="status" class="settings-feedback"></p><button class="save-button" type="submit"><svg><use href="#i-check"/></svg>설정 저장</button>
     </form>

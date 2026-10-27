@@ -1,0 +1,12 @@
+// A tiny original robot GLB for the app's isolated import/render smoke check.
+// No personal model or network service is used by verification.
+function modelFixture(){
+  const {BoxGeometry}=require('three'),geometry=new BoxGeometry(1,1,1).toNonIndexed();
+  const position=geometry.getAttribute('position'),normal=geometry.getAttribute('normal');
+  const parts=[Buffer.from(position.array.buffer),Buffer.from(normal.array.buffer),Buffer.from(new Float32Array([0,1,2]).buffer),Buffer.from(new Float32Array([0,1.7,0,0,1.76,0,0,1.7,0]).buffer)];
+  let offset=0;const views=parts.map(part=>{const view={buffer:0,byteOffset:offset,byteLength:part.length};offset+=part.length;return view;});
+  const nodes=[{name:'Robot',children:[1,2,3,4,5,6]},{name:'Head',mesh:0,translation:[0,1.7,0],scale:[.72,.6,.5]},{mesh:1,translation:[0,1,0],scale:[.65,.8,.38]},{mesh:1,translation:[-.21,.35,0],scale:[.2,.55,.25]},{mesh:1,translation:[.21,.35,0],scale:[.2,.55,.25]},{mesh:0,translation:[-.48,1,0],scale:[.17,.65,.23]},{mesh:0,translation:[.48,1,0],scale:[.17,.65,.23]}];
+  const json={asset:{version:'2.0',generator:'Parkjuim import test'},scene:0,scenes:[{nodes:[0]}],nodes,meshes:[0,1].map(material=>({primitives:[{attributes:{POSITION:0,NORMAL:1},material}]})),materials:[{pbrMetallicRoughness:{baseColorFactor:[.9,.64,.25,1],metallicFactor:.1,roughnessFactor:.8}},{pbrMetallicRoughness:{baseColorFactor:[.2,.5,.55,1],metallicFactor:.1,roughnessFactor:.8}}],buffers:[{byteLength:offset}],bufferViews:views,accessors:[{bufferView:0,componentType:5126,count:position.count,type:'VEC3',min:[-.5,-.5,-.5],max:[.5,.5,.5]},{bufferView:1,componentType:5126,count:normal.count,type:'VEC3'},{bufferView:2,componentType:5126,count:3,type:'SCALAR',min:[0],max:[2]},{bufferView:3,componentType:5126,count:3,type:'VEC3'}],animations:[{name:'Idle',samplers:[{input:2,output:3,interpolation:'LINEAR'}],channels:[{sampler:0,target:{node:1,path:'translation'}}]}]};
+  const raw=Buffer.from(JSON.stringify(json)),text=Buffer.alloc(Math.ceil(raw.length/4)*4,32);raw.copy(text);const binary=Buffer.concat(parts),out=Buffer.alloc(12+8+text.length+8+binary.length);out.writeUInt32LE(0x46546c67,0);out.writeUInt32LE(2,4);out.writeUInt32LE(out.length,8);out.writeUInt32LE(text.length,12);out.writeUInt32LE(0x4e4f534a,16);text.copy(out,20);out.writeUInt32LE(binary.length,20+text.length);out.writeUInt32LE(0x004e4942,24+text.length);binary.copy(out,28+text.length);geometry.dispose();return out;
+}
+module.exports={modelFixture};

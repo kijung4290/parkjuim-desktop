@@ -49,6 +49,7 @@
     "appId": "kr.parkjuim.desktop",
     "productName": "박주임 미니미",
     "asar": true,
+    "extraResources": [{"from":"node_modules/three/examples/jsm","to":"three-addons","filter":["loaders/GLTFLoader.js","utils/BufferGeometryUtils.js","utils/SkeletonUtils.js"]}],
     "electronDist": "node_modules/electron/dist",
     "publish": [
       {

@@ -2,6 +2,12 @@ const { contextBridge, ipcRenderer } = require('electron');
 const on = (channel, callback) => { const listener = (_event, data) => callback(data); ipcRenderer.on(channel, listener); return () => ipcRenderer.removeListener(channel, listener); };
 contextBridge.exposeInMainWorld('park', Object.freeze({
   settings: () => ipcRenderer.invoke('settings:get'),
+  setPortrait: data => ipcRenderer.send('pet:portrait',data),
+  onPortrait: callback => on('pet:portrait',callback),
+  modelError: () => ipcRenderer.send('pet:model-error'),
+  customModels: () => ipcRenderer.invoke('models:list'),
+  importModel: () => ipcRenderer.invoke('models:add'),
+  deleteModel: id => ipcRenderer.invoke('models:delete',id),
   saveSettings: input => ipcRenderer.invoke('settings:save', input),
   aiModels: input => ipcRenderer.invoke('ai:models', input),
   send: (id, input) => ipcRenderer.invoke('chat:send', id, input),
