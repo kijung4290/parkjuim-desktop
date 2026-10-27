@@ -14,7 +14,12 @@ async function createStore(directory, safeStorage) {
     secrets[field] = '';
     if (data[field]) try {
       const decrypt = safeStorage.decryptStringAsync || safeStorage.decryptString;
-      secrets[field] = await decrypt.call(safeStorage, Buffer.from(data[field], 'base64'));
+      const decrypted = await decrypt.call(safeStorage, Buffer.from(data[field], 'base64'));
+      // Electron's async API returns { result, shouldReEncrypt }; its legacy
+      // synchronous API returns the string directly. SDKs must receive a string.
+      const value = typeof decrypted === 'string' ? decrypted : decrypted?.result;
+      if (typeof value !== 'string') throw new Error('Invalid decrypted credential');
+      secrets[field] = value;
     } catch { /* A key from another Windows account cannot be decrypted. */ }
   }
   let queue = Promise.resolve();

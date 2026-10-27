@@ -11,6 +11,7 @@ const { isPetRegion } = require('./interaction.cjs');
 const { createStartupController } = require('./startup.cjs');
 const { createElevenLabs, SAMPLE_TEXT } = require('./elevenlabs.cjs');
 const { randomUUID } = require('node:crypto');
+const { chatError } = require('./chat-errors.cjs');
 const voiceSmoke = process.argv.includes('--voice-smoke-test');
 const smoke = process.argv.includes('--smoke-test') || voiceSmoke;
 // Local onboarding credentials are development-only and never bundled.
@@ -210,7 +211,8 @@ function registerIpc() {
     if (!apiKey) throw new Error('설정에서 Claude API 키를 먼저 입력해 주세요.');
     const Anthropic = require('@anthropic-ai/sdk');
     const controller = new AbortController(); activeRequest = { controller, id };
-    const timeout = setTimeout(() => controller.abort(), 90000);
+    let timedOut = false;
+    const timeout = setTimeout(() => { timedOut = true; controller.abort(); }, 90000);
     let text = '';
     petState({ thinking: true });
     try {
@@ -223,7 +225,7 @@ function registerIpc() {
       emit(chat, 'chat:event', { type: 'done', id, text });
       return { ok: true };
     } catch (error) {
-      const message = controller.signal.aborted ? '답변을 중지했어요.' : ({ 401: 'API 키가 올바르지 않아요. 설정에서 확인해 주세요.', 403: '이 API 키의 사용 권한을 확인해 주세요.', 404: '이 모델을 사용할 수 없어요. 설정의 모델 ID를 확인해 주세요.', 429: '요청 한도 또는 API 잔액을 확인한 후 다시 시도해 주세요.', 529: 'Claude가 잠시 바빠요. 조금 뒤 다시 시도해 주세요.' }[error.status] || 'Claude에 연결하지 못했어요. 인터넷 연결과 API 사용 상태를 확인해 주세요.');
+      const message = chatError(error, { cancelled:controller.signal.aborted, timedOut });
       emit(chat, 'chat:event', { type: 'error', id, text, message }); return { error: message };
     } finally { clearTimeout(timeout); activeRequest = null; petState({ thinking: false }); }
   });
@@ -368,6 +370,10 @@ else {
         const secureKey = 'sk-ant-smoke-test-key-123456789';
         const secured = await store.save({apiKey:secureKey});
         if (!secured.hasKey || secured.apiKey || fs.readFileSync(path.join(app.getPath('userData'), 'settings.json'),'utf8').includes(secureKey)) throw new Error('OS key encryption failed');
+        await store.save({elevenLabsApiKey:'sk-test-restart-key-123456789'});
+        const reopened = await createStore(app.getPath('userData'),safeStorage);
+        if (reopened.key() !== secureKey || reopened.elevenLabsKey() !== 'sk-test-restart-key-123456789') throw new Error('Credentials did not survive an actual async decrypt/reopen');
+        await store.save({clearElevenLabsKey:true});
         await store.save({clearKey:true});
         const paused = pet.getBounds().x;
         await new Promise(resolve => setTimeout(resolve, 250));
@@ -410,7 +416,7 @@ else {
           fs.writeFileSync(path.join(dir,'voice-settings.png'),(await chat.webContents.capturePage()).toPNG());
           await store.save({clearElevenLabsKey:true});
         }
-        const result={...state,chatTest,nativeClick:true,repeatClick:true,dragDoesNotChat:true,nativeHitRecovery:true,essentialGait:true,reducedMotion:walkState.reduced,roaming:true,hoverPause:true,chatPause:true,encryptedKey:true,missingKeyGuard:true,speechHelper:true,voicePlayback,capabilities,model:keyState.model,pet:pet.getBounds(),chat:chat.getBounds()};
+        const result={...state,chatTest,nativeClick:true,repeatClick:true,dragDoesNotChat:true,nativeHitRecovery:true,essentialGait:true,reducedMotion:walkState.reduced,roaming:true,hoverPause:true,chatPause:true,encryptedKey:true,keyReopen:true,missingKeyGuard:true,speechHelper:true,voicePlayback,capabilities,model:keyState.model,pet:pet.getBounds(),chat:chat.getBounds()};
         fs.writeFileSync(path.join(dir,'result.json'),JSON.stringify(result,null,2));
         console.log('SMOKE PASS', JSON.stringify(result));
         app.exit(0);

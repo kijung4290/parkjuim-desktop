@@ -7,3 +7,16 @@ test('rejects malformed API messages and bounded history',()=>{assert.throws(()=
 test('settings reject model injection and keep valid known fields only',()=>{assert.throws(()=>sanitizeSettings({model:'../../key'}));assert.equal(sanitizeSettings({scale:20,speed:-99}).scale,1.4);assert.equal(sanitizeSettings({scale:20,speed:-99}).speed,8);assert.equal(sanitizeSettings({apiKey:'secret'}).apiKey,undefined);assert.equal(sanitizeSettings({roam:'false'}).roam,true);assert.equal(DEFAULTS.roam,true);});
 test('API key is encrypted on disk and never returned by settings',async()=>{const dir=fs.mkdtempSync(path.join(os.tmpdir(),'parkjuim-store-'));const secret='sk-ant-test-key-123456789';const safe={isEncryptionAvailable:()=>true,encryptString:s=>Buffer.from([...s].reverse().join('')),decryptString:b=>[...b.toString()].reverse().join('')};try{let store=await createStore(dir,safe);const result=await store.save({apiKey:secret,roam:false});assert.equal(result.hasKey,true);assert.equal(result.apiKey,undefined);assert.equal(store.key(),secret);assert.ok(!fs.readFileSync(path.join(dir,'settings.json'),'utf8').includes(secret));store=await createStore(dir,safe);assert.equal(store.key(),secret);assert.equal(store.get().roam,false);await store.save({clearKey:true});assert.equal(store.key(),'');}finally{fs.rmSync(dir,{recursive:true,force:true});}});
 test('does not persist keys when encryption is unavailable',async()=>{const dir=fs.mkdtempSync(path.join(os.tmpdir(),'parkjuim-store-'));try{const store=await createStore(dir,{isEncryptionAvailable:()=>false});await assert.rejects(store.save({apiKey:'sk-ant-test-key-123456789'}),/암호화/);assert.equal(store.get().hasKey,false);}finally{fs.rmSync(dir,{recursive:true,force:true});}});
+
+test('Electron async decrypt result is unwrapped into string keys after restart',async()=>{
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'parkjuim-async-'));
+  const safe={isAsyncEncryptionAvailable:async()=>true,encryptStringAsync:async value=>Buffer.from([...value].reverse().join('')),decryptStringAsync:async buffer=>({result:[...buffer.toString()].reverse().join(''),shouldReEncrypt:false})};
+  const claude='sk-ant-test-key-123456789',eleven='sk-test-eleven-key-123456789';
+  try{
+    let store=await createStore(dir,safe);await store.save({apiKey:claude,elevenLabsApiKey:eleven});
+    store=await createStore(dir,safe);
+    assert.equal(store.key(),claude);assert.equal(typeof store.key(),'string');
+    assert.equal(store.elevenLabsKey(),eleven);assert.equal(typeof store.elevenLabsKey(),'string');
+    assert.ok(!JSON.stringify(store.get()).includes(claude));assert.ok(!JSON.stringify(store.get()).includes(eleven));
+  }finally{fs.rmSync(dir,{recursive:true,force:true});}
+});
