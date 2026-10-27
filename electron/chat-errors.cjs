@@ -1,4 +1,16 @@
-function chatError(error, { cancelled = false, timedOut = false } = {}) {
+function chatError(error, { cancelled = false, timedOut = false,provider='claude' } = {}) {
+  if(provider!=='claude'){
+    const label=provider==='gemini'?'Gemini':'GPT(OpenAI)',status=Number(error?.status||error?.statusCode||error?.response?.status||error?.code)||0;
+    if(timedOut)return `${label} 응답 시간이 길어졌어요. 잠시 뒤 다시 보내 주세요.`;
+    if(cancelled)return '답변을 중지했어요.';
+    if(status===401||status===403)return `${label} API 키와 모델 사용 권한을 확인해 주세요. (${status})`;
+    if(status===404)return `${label} 모델을 찾지 못했어요. 설정에서 모델 목록을 불러오거나 ID를 확인해 주세요. (404)`;
+    if(status===429||status===402)return `${label} API 사용 한도·크레딧·결제 상태를 확인하고 잠시 뒤 다시 보내 주세요. (${status})`;
+    if(status===400||status===422)return `${label} 모델이 요청을 처리하지 못했어요. 검색·파일을 지원하는 모델인지 확인하거나 웹 검색을 끄고 다시 보내 주세요. (${status})`;
+    if(status===413)return '대화와 파일이 너무 많아요. 새 대화를 시작해 주세요. (413)';
+    if(status>=500)return `${label} 서버가 잠시 응답하지 못했어요. 잠시 뒤 다시 보내 주세요. (${status})`;
+    return `${label}에 연결하지 못했어요. 인터넷 연결과 API 키·사용 상태를 확인해 주세요.`;
+  }
   if (timedOut) return 'Claude 응답 시간이 길어졌어요. 잠시 뒤 다시 보내 주세요.';
   if (cancelled) return '답변을 중지했어요.';
   const status = error?.status;

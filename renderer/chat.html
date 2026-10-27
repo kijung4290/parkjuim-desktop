@@ -26,10 +26,10 @@
   <div id="update-banner" class="update-banner" role="status" hidden><span id="update-banner-text"></span><button id="update-now" type="button">지금 업데이트</button></div>
   <div id="notice" class="notice" role="status" hidden></div>
   <button id="stop-speech" class="speech-stop" type="button" hidden>음성 준비 중 · 그만 읽기</button>
-  <div id="connection-tip" class="connection-tip" hidden><span class="key-dot"></span>처음이라면, Claude API 키를 연결해 주세요.<button id="connect-key">연결하기 ↗</button></div>
+  <div id="connection-tip" class="connection-tip" hidden><span class="key-dot"></span>처음이라면, AI API 키를 연결해 주세요.<button id="connect-key">연결하기 ↗</button></div>
   <form id="composer" class="composer">
     <div class="composer-tools"><button id="attach-file" class="composer-tool" type="button" title="PDF·이미지·텍스트·Word·Excel 첨부"><svg><use href="#i-attach"/></svg>파일 첨부</button><button id="toggle-search" class="composer-tool" type="button" aria-pressed="false" title="웹 검색을 켜면 필요할 때 검색해요. 추가 API 검색 사용료가 발생할 수 있어요."><svg><use href="#i-web"/></svg>웹 검색</button><span id="attachment-count" class="attachment-count">파일당 최대 6MB</span></div>
-    <div id="attachment-list" class="attachment-list" aria-label="보낼 첨부 파일" hidden></div><p id="attachment-note" class="attachment-note" hidden>보내면 파일 내용이 Claude로 전송돼요. Word·Excel은 텍스트·표 값을 읽어요.</p>
+    <div id="attachment-list" class="attachment-list" aria-label="보낼 첨부 파일" hidden></div><p id="attachment-note" class="attachment-note" hidden>보내면 파일 내용이 선택한 AI로 전송돼요. Word·Excel은 텍스트·표 값을 읽어요.</p>
     <div class="input-row"><textarea id="message" aria-label="박주임에게 할 말" placeholder="박주임, 있잖아요…" rows="1" maxlength="12000"></textarea><button type="submit" class="send-button" id="send" title="보내기" aria-label="메시지 보내기"><svg><use href="#i-send"/></svg></button></div><div class="composer-bottom"><button type="button" id="microphone" class="voice-button" aria-label="음성 입력 시작" aria-pressed="false"><svg><use href="#i-mic"/></svg><span id="mic-label">말로 입력</span></button><button type="button" id="toggle-speech" class="voice-button" aria-label="답변 읽기 켜기 또는 끄기" aria-pressed="true"><svg><use href="#i-sound"/></svg><span>답변 읽기</span></button><span class="input-hint">Enter로 보내기</span></div></form>
   <footer class="footnote">Claude와 함께하는 박주임 · 대화는 이 실행 중에만 기억해요</footer>
   <section id="settings-panel" class="settings-panel" aria-label="박주임 설정" hidden>
@@ -38,6 +38,17 @@
       <span class="section-label">시작 설정</span>
       <label class="toggle-row"><span><strong>Windows 시작 시 자동 실행</strong><small>로그인하면 대화창 없이 박주임만 나타나요.</small></span><input id="setting-start" type="checkbox" role="switch" aria-describedby="startup-status"><span class="switch" aria-hidden="true"></span></label>
       <p id="startup-status" class="settings-feedback" role="status">변경하면 바로 적용돼요.</p>
+      <div class="section-divider"></div>
+      <section id="ai-settings" aria-label="대화 AI 설정">
+      <div class="settings-intro"><span class="section-label">대화 AI</span><span id="key-status" class="key-status">키 입력 필요</span></div>
+      <label class="field">AI 서비스<select id="ai-provider"><option value="claude">Claude · Anthropic</option><option value="gemini">Gemini · Google</option><option value="openai">GPT · OpenAI</option></select><small>서비스·모델을 바꾸고 저장하면 새 대화가 시작돼요. 키와 모델은 서비스별로 기억해요.</small></label>
+      <label class="field">API 키<input id="api-key" type="password" placeholder="sk-ant-…" autocomplete="off" spellcheck="false"><small>이 PC의 Windows 계정으로 암호화해 저장해요.</small></label>
+      <div class="field-actions"><button type="button" id="get-key" class="text-button">API 키 발급받기 ↗</button><button type="button" id="delete-key" class="text-button danger" hidden>저장된 키 삭제</button></div>
+      <label class="field"><span id="ai-model-label">Claude 모델</span><input id="model" type="text" list="ai-models" spellcheck="false" required maxlength="150"><datalist id="ai-models"></datalist><small>계정에서 사용할 수 있는 모델 ID를 입력하거나 선택해 주세요.</small></label>
+      <button id="load-models" class="text-button" type="button">모델 목록 불러오기</button>
+      <p id="ai-feedback" class="settings-feedback" role="status"></p>
+      <p id="ai-privacy" class="privacy-note"></p>
+      </section>
       <div class="section-divider"></div>
       <section class="voice-settings" aria-label="박주임의 목소리">
         <div class="settings-intro"><span class="section-label">박주임의 목소리</span><span id="eleven-key-status" class="key-status">연결 전</span></div>
@@ -59,11 +70,7 @@
       <div class="section-divider"></div>
       <section class="update-settings" aria-label="앱 업데이트"><div class="settings-intro"><span class="section-label">앱 업데이트</span><span id="app-version" class="key-status"></span></div><p id="update-status" role="status">업데이트 상태를 확인하고 있어요.</p><div class="field-actions"><button id="check-update" type="button" class="text-button">업데이트 확인</button><button id="install-update" type="button" class="text-button" hidden>지금 업데이트</button><button id="open-releases" type="button" class="text-button">최신 설치 파일 ↗</button></div><small>설치형은 새 버전을 자동으로 내려받고 앱을 종료할 때 적용해요.</small></section>
       <div class="section-divider"></div>
-      <div class="settings-intro"><span class="section-label">CLAUDE 연결</span><span id="key-status" class="key-status">연결 전</span></div>
-      <label class="field">API 키<input id="api-key" type="password" placeholder="sk-ant-…" autocomplete="off" spellcheck="false"><small>이 PC의 Windows 계정으로 암호화해 저장해요.</small></label>
-      <div class="field-actions"><button type="button" id="get-key" class="text-button">API 키 발급받기 ↗</button><button type="button" id="delete-key" class="text-button danger" hidden>저장된 키 삭제</button></div>
-      <label class="field">Claude 모델<input id="model" type="text" spellcheck="false" required maxlength="100"><small>계정에서 사용할 수 있는 모델 ID를 입력해 주세요.</small></label>
-      <p class="privacy-note">보낸 대화는 Anthropic API로 전송되며 사용량에 따라 요금이 발생해요. Claude 구독과 API 결제는 별개예요.</p>
+
       <div class="section-divider"></div><span class="section-label">산책과 목소리</span>
       <label class="toggle-row"><span><strong>자유롭게 산책하기</strong><small>마우스를 올리거나 대화할 때는 멈춰요.</small></span><input id="setting-roam" type="checkbox" role="switch"><span class="switch" aria-hidden="true"></span></label>
       <label class="toggle-row"><span><strong>항상 위에 표시</strong><small>다른 프로그램 위에서도 만날 수 있어요.</small></span><input id="setting-top" type="checkbox" role="switch"><span class="switch" aria-hidden="true"></span></label>

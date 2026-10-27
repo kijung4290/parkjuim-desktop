@@ -1,6 +1,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { DEFAULTS, sanitizeSettings } = require('./core.cjs');
+const {providerInfo}=require('./providers.cjs');
 async function createStore(directory, safeStorage) {
   fs.mkdirSync(directory, { recursive: true });
   const file = path.join(directory, 'settings.json');
@@ -8,9 +9,9 @@ async function createStore(directory, safeStorage) {
   try { data = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (error) { if (error.code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error; }
   let settings;
   try { settings = sanitizeSettings(data.settings, DEFAULTS); } catch { settings = { ...DEFAULTS }; }
-  const write = () => { const temp = `${file}.tmp`; fs.writeFileSync(temp, JSON.stringify({ settings, encryptedKey: data.encryptedKey || '', encryptedElevenLabsKey: data.encryptedElevenLabsKey || '' }, null, 2), { mode: 0o600 }); fs.renameSync(temp, file); };
+  const write = () => { const temp = `${file}.tmp`; fs.writeFileSync(temp, JSON.stringify({ settings, encryptedKey:data.encryptedKey||'', encryptedElevenLabsKey:data.encryptedElevenLabsKey||'',encryptedGeminiKey:data.encryptedGeminiKey||'',encryptedOpenAIKey:data.encryptedOpenAIKey||'' }, null, 2), { mode: 0o600 }); fs.renameSync(temp, file); };
   const secrets = {};
-  for (const field of ['encryptedKey','encryptedElevenLabsKey']) {
+  for (const field of ['encryptedKey','encryptedElevenLabsKey','encryptedGeminiKey','encryptedOpenAIKey']) {
     secrets[field] = '';
     if (data[field]) try {
       const decrypt = safeStorage.decryptStringAsync || safeStorage.decryptString;
@@ -24,8 +25,9 @@ async function createStore(directory, safeStorage) {
   }
   let queue = Promise.resolve();
   return {
-    get: () => ({ ...settings, hasKey: !!secrets.encryptedKey, hasElevenLabsKey: !!secrets.encryptedElevenLabsKey }),
+    get: () => ({ ...settings, hasKey:!!secrets.encryptedKey,hasGeminiKey:!!secrets.encryptedGeminiKey,hasOpenAIKey:!!secrets.encryptedOpenAIKey,hasSelectedKey:!!secrets[providerInfo(settings.aiProvider).keyField],hasElevenLabsKey:!!secrets.encryptedElevenLabsKey }),
     key: () => secrets.encryptedKey,
+    keyFor:provider=>secrets[providerInfo(provider).keyField],
     elevenLabsKey: () => secrets.encryptedElevenLabsKey,
     save(input) {
       const operation = queue.then(async () => {
@@ -33,6 +35,8 @@ async function createStore(directory, safeStorage) {
       const nextData = { ...data }, nextSecrets = { ...secrets };
       for (const [field, key, clear, pattern, message] of [
         ['encryptedKey','apiKey','clearKey',/^sk-ant-[\w-]{12,}$/, 'Claude API 키 형식을 확인해 주세요. sk-ant-로 시작합니다.'],
+        ['encryptedGeminiKey','geminiApiKey','clearGeminiKey',/^[\w-]{20,512}$/, 'Gemini API 키 형식을 확인해 주세요.'],
+        ['encryptedOpenAIKey','openaiApiKey','clearOpenAIKey',/^[\w-]{20,512}$/, 'GPT(OpenAI) API 키 형식을 확인해 주세요.'],
         ['encryptedElevenLabsKey','elevenLabsApiKey','clearElevenLabsKey',/^[\w-]{20,256}$/, 'ElevenLabs API 키 형식을 확인해 주세요.']
       ]) {
         if (input[clear] === true) { nextData[field] = ''; nextSecrets[field] = ''; }

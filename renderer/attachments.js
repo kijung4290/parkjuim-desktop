@@ -28,7 +28,7 @@ export function createAttachments({bridge,notify,onChange=()=>{}}){
     try{
       const result=await bridge.chooseAttachments(4-files.length);
       if(result?.error)throw new Error(result.error);
-      files.push(...result.files);if(result.errors?.length)notify(result.errors.join('\n'));else if(result.files.length)notify('보내기를 누르면 첨부한 파일 내용이 Claude로 전송돼요.');
+      files.push(...result.files);if(result.errors?.length)notify(result.errors.join('\n'));else if(result.files.length)notify('보내기를 누르면 첨부한 파일 내용이 선택한 AI로 전송돼요.');
     }catch(error){notify(error.message);}finally{loading=false;render();}
   });
   $('#toggle-search').addEventListener('click',()=>{

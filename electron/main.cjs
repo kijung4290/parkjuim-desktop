@@ -3,7 +3,7 @@ const path = require('node:path');
 const fs = require('node:fs');
 const { pathToFileURL } = require('node:url');
 const { spawn } = require('node:child_process');
-const { DEFAULTS, SYSTEM_PROMPT, clampPosition, chatBounds, validateMessages } = require('./core.cjs');
+const { DEFAULTS, SYSTEM_PROMPT, clampPosition, chatBounds, validateMessages, sanitizeSettings } = require('./core.cjs');
 const { createStore } = require('./store.cjs');
 const { createUpdateController, getUpdateMode } = require('./updater.cjs');
 const { createWalker } = require('./movement.cjs');
@@ -13,12 +13,14 @@ const { createElevenLabs, SAMPLE_TEXT } = require('./elevenlabs.cjs');
 const { randomUUID } = require('node:crypto');
 const { chatError } = require('./chat-errors.cjs');
 const { createAttachmentStore,EXTENSIONS } = require('./attachments.cjs');
-const { createConversation,validateTurn,ConversationError } = require('./conversation.cjs');
+const { validateTurn,ConversationError } = require('./conversation.cjs');
+const {createClient,listModels,createAIConversation}=require('./ai-chat.cjs');
+const {providerInfo,selectedAI,validKey}=require('./providers.cjs');
 const attachmentStore=createAttachmentStore();
-const conversation=createConversation({attachments:attachmentStore});
+const conversation=createAIConversation({attachments:attachmentStore});
 let selectingFiles=false;
 let chooseFiles=(...args)=>dialog.showOpenDialog(...args);
-let makeChatClient=apiKey=>new (require('@anthropic-ai/sdk'))({apiKey,maxRetries:0,timeout:150000});
+let makeChatClient=createClient;
 const voiceSmoke = process.argv.includes('--voice-smoke-test');
 const smoke = process.argv.includes('--smoke-test') || voiceSmoke;
 // Local onboarding credentials are development-only and never bundled.
@@ -78,9 +80,11 @@ function handle(channel, kind, fn) { ipcMain.handle(channel, async (event, ...ar
 function on(channel, kind, fn) { ipcMain.on(channel, (event, ...args) => { try { trusted(event, kind); fn(...args); } catch {} }); }
 function secureWindow(options) {
   const win = new BrowserWindow({ show: false, frame: false, resizable: false, maximizable: false, fullscreenable: false, backgroundColor: '#00000000', webPreferences: { preload: path.join(__dirname, 'preload.cjs'), nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true, backgroundThrottling: false }, ...options });
-  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  win.webContents.setWindowOpenHandler(details => {if(conversation.suggestionLink(details.url))shell.openExternal(details.url);return {action:'deny'};});
   win.webContents.on('will-navigate', e => e.preventDefault());
+  win.webContents.on('will-frame-navigate', e => {if(!e.isMainFrame&&!e.url.startsWith('park://app/grounding/'))e.preventDefault();});
   win.webContents.on('will-attach-webview', e => e.preventDefault());
+  if(smoke)win.webContents.on('console-message',details=>{if(details.level==='error')console.error('RENDERER SMOKE:',details.message);});
   return win;
 }
 function placeChat() { if (chat && !chat.isDestroyed()) chat.setBounds(chatBounds(pet.getBounds(), screen.getDisplayMatching(pet.getBounds()).workArea)); }
@@ -111,7 +115,11 @@ function resetPosition() {
   placeChat();
 }
 async function updateSettings(input) {
+  const previous=selectedAI(settings),next=selectedAI(sanitizeSettings(input,settings));
+  const changed=previous.id!==next.id||previous.model!==next.model;
+  if(changed&&(activeRequest||selectingFiles))throw new Error('답변과 파일 읽기가 끝난 뒤 AI 서비스·모델을 변경해 주세요.');
   await store.save(input);
+  if(changed){conversation.reset();silence();emit(chat,'chat:event',{type:'reset'});}
   try {
     if (typeof input.startAtLogin === 'boolean' && (input.startAtLogin !== startup.get().startAtLogin || startup.get().startAtLoginBlocked)) startup.set(input.startAtLogin);
   } catch (error) {
@@ -201,6 +209,13 @@ function registerIpc() {
   handle('update:install', 'chat', () => updates.install());
   handle('settings:get', null, () => (settings = currentSettings()));
   handle('settings:save', 'chat', input => updateSettings(input));
+  handle('ai:models','chat',async input=>{
+    if(!input||typeof input!=='object')throw new Error('AI 서비스를 선택해 주세요.');
+    const info=providerInfo(input.provider);
+    const key=input.apiKey?validKey(info.id,input.apiKey):store.keyFor(info.id);
+    if(!key)throw new Error(`${info.label} API 키를 입력하거나 저장해 주세요.`);
+    try{return {provider:info.id,models:await listModels(info.id,key)};}catch(error){throw new Error(chatError(error,{provider:info.id}));}
+  });
   handle('pet:chat', 'pet', () => chat.isVisible() ? hideChat() : showChat());
   handle('chat:hide', 'chat', hideChat);
   handle('pet:menu', 'pet', contextMenu);
@@ -229,8 +244,8 @@ function registerIpc() {
     if (activeRequest) throw new Error('답변을 마치거나 중지한 뒤 다시 보내 주세요.');
     if (selectingFiles) throw new Error('첨부 파일을 읽고 있어요. 잠시 기다려 주세요.');
     if (typeof id !== 'string' || !/^[\w-]{1,80}$/.test(id)) throw new Error('잘못된 요청입니다.');
-    const turn=validateTurn(input),apiKey=store.key();
-    if (!apiKey) throw new Error('설정에서 Claude API 키를 먼저 입력해 주세요.');
+    const turn=validateTurn(input),ai=selectedAI(settings),apiKey=store.keyFor(ai.id);
+    if (!apiKey) throw new Error(`설정에서 ${ai.label} API 키를 먼저 입력해 주세요.`);
     attachmentStore.get(turn.attachmentIds);
     const controller = new AbortController(); activeRequest = { controller, id };
     let timedOut = false;
@@ -238,12 +253,12 @@ function registerIpc() {
     let text = '';
     petState({ thinking: true });
     try {
-      const client = makeChatClient(apiKey);
-      const result=await conversation.send(turn,{client,model:settings.model,system:SYSTEM_PROMPT + (settings.nickname ? `\n사용자 호칭: ${settings.nickname}` : '') + (settings.systemPrompt ? `\n추가 요청: ${settings.systemPrompt}` : ''),signal:controller.signal,emit:event=>{if(event.type==='delta')text+=event.text;emit(chat,'chat:event',{...event,id});}});
+      const client = makeChatClient(apiKey,ai.id);
+      const result=await conversation.send(turn,{client,provider:ai.id,model:ai.model,system:SYSTEM_PROMPT + (settings.nickname ? `\n사용자 호칭: ${settings.nickname}` : '') + (settings.systemPrompt ? `\n추가 요청: ${settings.systemPrompt}` : ''),signal:controller.signal,emit:event=>{if(event.type==='delta')text+=event.text;emit(chat,'chat:event',{...event,id});}});
       emit(chat, 'chat:event', { type: 'done', id, ...result });
       return { ok: true };
     } catch (error) {
-      const message = error instanceof ConversationError ? error.message : chatError(error, { cancelled:controller.signal.aborted, timedOut });
+      const message = error instanceof ConversationError ? error.message : chatError(error, { cancelled:controller.signal.aborted, timedOut,provider:ai.id });
       emit(chat, 'chat:event', { type: 'error', id, text, message }); return { error: message };
     } finally { clearTimeout(timeout); activeRequest = null; petState({ thinking: false }); }
   });
@@ -277,7 +292,7 @@ function registerIpc() {
       petState({speaking:true}); emit(chat,'voice:event',{type:'speech-state',state:'playing'});
     } else silence();
   });
-  handle('link:open', 'chat', name => { const url = { console: 'https://platform.claude.com/settings/keys', elevenlabs:'https://elevenlabs.io/app/settings/api-keys', voices:'https://elevenlabs.io/app/voice-library', speech: 'ms-settings:speech', releases: 'https://github.com/kijung4290/parkjuim-desktop/releases/latest' }[name]; if (url) return shell.openExternal(url); });
+  handle('link:open', 'chat', name => { const url = { console:providerInfo('claude').keyUrl,gemini:providerInfo('gemini').keyUrl,openai:providerInfo('openai').keyUrl, elevenlabs:'https://elevenlabs.io/app/settings/api-keys', voices:'https://elevenlabs.io/app/voice-library', speech: 'ms-settings:speech', releases: 'https://github.com/kijung4290/parkjuim-desktop/releases/latest' }[name]; if (url) return shell.openExternal(url); });
 }
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
@@ -285,6 +300,11 @@ else {
   app.whenReady().then(async () => {
     protocol.handle('park', request => {
       const url = new URL(request.url), relative = decodeURIComponent(url.pathname);
+      if(url.host==='app'&&/^\/grounding\/[\w-]+$/.test(relative)){
+        const html=conversation.grounding(relative.split('/').pop());
+        if(!html)return new Response('Not found',{status:404});
+        return new Response(`<!doctype html><meta charset="utf-8">${html}`,{headers:{'Content-Type':'text/html; charset=utf-8','Content-Security-Policy':"default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; img-src data: https://www.gstatic.com https://www.google.com; base-uri 'none'; form-action 'none'; frame-ancestors 'self'"}});
+      }
       const root = path.resolve(__dirname, '..');
       const file = relative.startsWith('/vendor/') ? path.join(root, 'node_modules/three/build', relative.slice('/vendor/'.length)) : path.join(root, 'renderer', relative);
       const allowed = relative.startsWith('/vendor/') ? path.join(root, 'node_modules/three/build') : path.join(root, 'renderer');
@@ -295,7 +315,9 @@ else {
     session.defaultSession.setPermissionCheckHandler(() => false);
     const mode = smoke ? 'development' : getUpdateMode({ packaged:app.isPackaged, platform:process.platform, portable:!!process.env.PORTABLE_EXECUTABLE_FILE, executable:app.getPath('exe') });
     startup = createStartupController({ app, mode });
-    store = await createStore(app.getPath('userData'), safeStorage); settings = currentSettings();
+    store = await createStore(app.getPath('userData'), safeStorage);
+    if(smoke)await store.save({...DEFAULTS,clearKey:true,clearGeminiKey:true,clearOpenAIKey:true,clearElevenLabsKey:true});
+    settings = currentSettings();
     elevenLabs = createElevenLabs({ key:() => store.elevenLabsKey() || environmentKey(), allowEnvironment:!smoke });
     pet = secureWindow({ ...petSize(), transparent: true, skipTaskbar: true, hasShadow: false, title: '박주임 미니미' });
     chat = secureWindow({ width: 380, height: 490, transparent: true, hasShadow: false, skipTaskbar: true, title: '박주임과 대화' });
@@ -436,6 +458,40 @@ else {
           if(!researchUI||!followupPreserved)throw new Error('Search or attachment multi-turn context was lost');
           await chat.webContents.executeJavaScript(`(async()=>{document.querySelector('#new-chat').click();for(let i=0;i<100;i++){await new Promise(r=>setTimeout(r,50));if(!document.querySelector('.message'))return true;}throw new Error('New chat did not clear history');})()`);
           if(conversation.inspect().turns!==0)throw new Error('Main conversation did not reset');
+          for(const provider of ['gemini','openai']){
+            makeChatClient=(_key,id)=>{
+              if(id!==provider)throw new Error('Wrong provider selected');
+              const answer='새 AI도 첨부 예산의 합계 200을 확인했어요.';
+              const annotation={type:'url_citation',url:'https://www.electronjs.org/',title:'Electron'};
+              if(id==='gemini')return {interactions:{create:async params=>{if(!params.tools||!JSON.stringify(params.input).includes('smoke-budget.xlsx'))throw new Error('Gemini files/search missing');return {status:'completed',steps:[{type:'google_search_call',queries:['Electron']},{type:'google_search_result',call_id:'s1',result:[{search_suggestions:'<div style="padding:8px;font:13px sans-serif">Google · <a target="_blank" href="https://www.google.com/search?q=Electron">Electron 검색</a></div><script>parent.evil=1</script>'}]},{type:'model_output',content:[{type:'text',text:answer,annotations:[annotation]}]}]};}}};
+              return {responses:{stream:params=>{if(!params.tools||!JSON.stringify(params.input).includes('smoke-budget.xlsx'))throw new Error('GPT files/search missing');const stream=new(require('node:events').EventEmitter)();stream.finalResponse=async()=>{stream.emit('response.output_text.delta',{delta:answer});return {status:'completed',output:[{type:'web_search_call'},{type:'message',content:[{type:'output_text',text:answer,annotations:[annotation]}]}]};};return stream;}}};
+            };
+            const saved=await chat.webContents.executeJavaScript(`(async()=>{
+              document.querySelector('#open-settings').click();const select=document.querySelector('#ai-provider');select.value='${provider}';select.dispatchEvent(new Event('change'));
+              document.querySelector('#api-key').value='test-${provider}-key-123456789012345';document.querySelector('#settings-form').requestSubmit();
+              for(let i=0;i<100;i++){await new Promise(r=>setTimeout(r,50));const settings=await window.park.settings();if(settings.aiProvider==='${provider}'&&settings.hasSelectedKey&&!document.querySelector('.save-button').disabled){if(document.querySelector('#api-key').value)throw new Error('Key not cleared');return settings;}}throw new Error('Provider settings did not save');
+            })()`);
+            if(!saved.hasKey||!saved.hasSelectedKey)throw new Error('Provider key isolation failed');
+            fs.writeFileSync(path.join(dir,`settings-${provider}.png`),(await chat.webContents.capturePage()).toPNG());
+            await chat.webContents.executeJavaScript(`(async()=>{
+              document.querySelector('#back-chat').click();if(document.querySelector('.message'))throw new Error('Provider change did not clear chat');
+              document.querySelector('#attach-file').click();for(let i=0;i<400;i++){if(document.querySelector('.attachment-chip'))break;await new Promise(r=>setTimeout(r,50));}
+              if(document.querySelector('#toggle-search').getAttribute('aria-pressed')!=='true')document.querySelector('#toggle-search').click();
+              document.querySelector('#message').value='분석하고 검색해 주세요';document.querySelector('#composer').requestSubmit();
+              for(let i=0;i<200;i++){await new Promise(r=>setTimeout(r,50));if(document.querySelector('.answer-source')&&document.querySelector('#send').getAttribute('aria-label')==='메시지 보내기'){if(!document.querySelector('.message.assistant .bubble').textContent.includes('200'))throw new Error('Provider answer missing');return true;}}throw new Error('Provider chat failed: '+document.querySelector('#notice').textContent);
+            })()`);
+            if(provider==='gemini'){
+              await delay(300);
+              const frame=await chat.webContents.executeJavaScript(`({sandbox:document.querySelector('.google-suggestions')?.getAttribute('sandbox'),evil:!!window.evil})`);
+              if(frame.evil||frame.sandbox!=='allow-popups allow-popups-to-escape-sandbox')throw new Error('Google suggestions sandbox failed');
+              const child=chat.webContents.mainFrame.frames.find(item=>item.url.startsWith('park://app/grounding/'));
+              if(!child)throw new Error('Google suggestions did not load: '+JSON.stringify(chat.webContents.mainFrame.frames.map(item=>item.url)));
+              fs.writeFileSync(path.join(dir,'gemini-search.png'),(await chat.webContents.capturePage()).toPNG());
+            }
+          }
+          const allKeys=await createStore(app.getPath('userData'),safeStorage);
+          if(!allKeys.keyFor('gemini')||!allKeys.keyFor('openai')||!allKeys.key())throw new Error('Provider keys did not survive reopen');
+          await updateSettings({aiProvider:'claude',clearGeminiKey:true,clearOpenAIKey:true});
         }finally{chooseFiles=realChoose;makeChatClient=realFactory;conversation.reset();settings=await store.save({speak:priorSpeak});settings=currentSettings();broadcast('settings:changed',settings);}
         await store.save({clearKey:true});
         const paused = pet.getBounds().x;
@@ -479,7 +535,7 @@ else {
           fs.writeFileSync(path.join(dir,'voice-settings.png'),(await chat.webContents.capturePage()).toPNG());
           await store.save({clearElevenLabsKey:true});
         }
-        const result={...state,chatTest,nativeClick:true,repeatClick:true,dragDoesNotChat:true,nativeHitRecovery:true,essentialGait:true,reducedMotion:walkState.reduced,roaming:true,hoverPause:true,chatPause:true,encryptedKey:true,keyReopen:true,attachments:true,officeWorker:true,searchUI:true,sourceLinks:true,followupContext:true,newChatReset:true,missingKeyGuard:true,speechHelper:true,voicePlayback,capabilities,model:keyState.model,pet:pet.getBounds(),chat:chat.getBounds()};
+        const result={...state,chatTest,nativeClick:true,repeatClick:true,dragDoesNotChat:true,nativeHitRecovery:true,essentialGait:true,reducedMotion:walkState.reduced,roaming:true,hoverPause:true,chatPause:true,encryptedKey:true,keyReopen:true,aiProviders:true,providerKeyReopen:true,providerSearchFiles:true,googleSuggestionsSandbox:true,attachments:true,officeWorker:true,searchUI:true,sourceLinks:true,followupContext:true,newChatReset:true,missingKeyGuard:true,speechHelper:true,voicePlayback,capabilities,model:keyState.model,pet:pet.getBounds(),chat:chat.getBounds()};
         fs.writeFileSync(path.join(dir,'result.json'),JSON.stringify(result,null,2));
         console.log('SMOKE PASS', JSON.stringify(result));
         app.exit(0);

@@ -3,6 +3,7 @@ const on = (channel, callback) => { const listener = (_event, data) => callback(
 contextBridge.exposeInMainWorld('park', Object.freeze({
   settings: () => ipcRenderer.invoke('settings:get'),
   saveSettings: input => ipcRenderer.invoke('settings:save', input),
+  aiModels: input => ipcRenderer.invoke('ai:models', input),
   send: (id, input) => ipcRenderer.invoke('chat:send', id, input),
   resetChat: () => ipcRenderer.invoke('chat:reset'),
   chooseAttachments: remaining => ipcRenderer.invoke('attachments:choose', remaining),
