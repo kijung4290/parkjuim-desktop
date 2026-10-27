@@ -3,7 +3,11 @@ const on = (channel, callback) => { const listener = (_event, data) => callback(
 contextBridge.exposeInMainWorld('park', Object.freeze({
   settings: () => ipcRenderer.invoke('settings:get'),
   saveSettings: input => ipcRenderer.invoke('settings:save', input),
-  send: (id, messages) => ipcRenderer.invoke('chat:send', id, messages),
+  send: (id, input) => ipcRenderer.invoke('chat:send', id, input),
+  resetChat: () => ipcRenderer.invoke('chat:reset'),
+  chooseAttachments: remaining => ipcRenderer.invoke('attachments:choose', remaining),
+  removeAttachment: id => ipcRenderer.invoke('attachments:remove', id),
+  openSource: id => ipcRenderer.invoke('chat:source', id),
   cancel: () => ipcRenderer.invoke('chat:cancel'),
   toggleChat: () => ipcRenderer.invoke('pet:chat'),
   closeChat: () => ipcRenderer.invoke('chat:hide'),

@@ -5,6 +5,8 @@ function chatError(error, { cancelled = false, timedOut = false } = {}) {
   const detail = error?.error?.error || error?.error || {};
   const message = typeof detail.message === 'string' ? detail.message : '';
   if (status === 400 && /credit|balance|billing|payment/i.test(message)) return 'Claude API 크레딧이 부족해요. Claude Platform의 결제·크레딧을 확인해 주세요. Claude 구독과 API 결제는 별개예요.';
+  if (status === 400 && /web_search|web search/i.test(message)) return 'Claude API 계정이나 선택한 모델에서 웹 검색을 사용할 수 없어요. 계정 권한을 확인하거나 웹 검색을 끄고 다시 보내 주세요.';
+  if (status === 400 && /pdf|image|document/i.test(message)) return '첨부 파일을 처리하지 못했어요. PDF 암호를 해제하거나 파일·이미지를 줄여 다시 첨부해 주세요.';
   if (status === 400) return 'Claude 요청 설정을 사용할 수 없어요. 설정에서 모델과 API 계정의 워크스페이스를 확인해 주세요. (400)';
   if (status === 401) return 'Claude API 키가 올바르지 않아요. 설정에서 키를 다시 연결해 주세요. (401)';
   if (status === 403) return '이 Claude API 키의 모델·워크스페이스 사용 권한을 확인해 주세요. (403)';

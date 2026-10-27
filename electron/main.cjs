@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, screen, Tray, Menu, nativeImage, safeStorage, shell, protocol, net, session } = require('electron');
+const { app, BrowserWindow, ipcMain, screen, Tray, Menu, nativeImage, safeStorage, shell, protocol, net, session, dialog } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
 const { pathToFileURL } = require('node:url');
@@ -12,6 +12,13 @@ const { createStartupController } = require('./startup.cjs');
 const { createElevenLabs, SAMPLE_TEXT } = require('./elevenlabs.cjs');
 const { randomUUID } = require('node:crypto');
 const { chatError } = require('./chat-errors.cjs');
+const { createAttachmentStore,EXTENSIONS } = require('./attachments.cjs');
+const { createConversation,validateTurn,ConversationError } = require('./conversation.cjs');
+const attachmentStore=createAttachmentStore();
+const conversation=createConversation({attachments:attachmentStore});
+let selectingFiles=false;
+let chooseFiles=(...args)=>dialog.showOpenDialog(...args);
+let makeChatClient=apiKey=>new (require('@anthropic-ai/sdk'))({apiKey,maxRetries:0,timeout:150000});
 const voiceSmoke = process.argv.includes('--voice-smoke-test');
 const smoke = process.argv.includes('--smoke-test') || voiceSmoke;
 // Local onboarding credentials are development-only and never bundled.
@@ -204,28 +211,39 @@ function registerIpc() {
     else if(phase==='end'){releasePetPress();if(chat.isVisible())placeChat();}
   });
   handle('chat:cancel', 'chat', () => activeRequest?.controller.abort());
+  handle('chat:reset','chat',()=>{if(selectingFiles)throw new Error('파일을 읽고 있어요. 잠시 기다려 주세요.');conversation.reset();return {ok:true};});
+  handle('attachments:choose','chat',async remaining=>{
+    if(activeRequest||selectingFiles)throw new Error('현재 작업을 마친 뒤 파일을 첨부해 주세요.');
+    if(!Number.isInteger(remaining)||remaining<1||remaining>4)throw new Error('한 번에 파일 4개까지 첨부할 수 있어요.');
+    selectingFiles=true;
+    try{
+      const chosen=await chooseFiles(chat,{title:'박주임에게 보여 줄 파일',properties:['openFile','multiSelections'],filters:[{name:'PDF · 이미지 · 텍스트 · Word · Excel',extensions:EXTENSIONS}]});
+      if(chosen.canceled)return {files:[],errors:[]};
+      if(chosen.filePaths.length>remaining)throw new Error(`추가로 ${remaining}개까지 첨부할 수 있어요.`);
+      return await attachmentStore.addPaths(chosen.filePaths);
+    }finally{selectingFiles=false;}
+  });
+  handle('attachments:remove','chat',id=>{if(activeRequest)throw new Error('전송 중에는 첨부를 해제할 수 없어요.');attachmentStore.remove(id);return {ok:true};});
+  handle('chat:source','chat',id=>{const url=conversation.source(id);if(!url)throw new Error('출처 링크를 찾지 못했어요. 다시 검색해 주세요.');return shell.openExternal(url);});
   handle('chat:send', 'chat', async (id, input) => {
     if (activeRequest) throw new Error('답변을 마치거나 중지한 뒤 다시 보내 주세요.');
+    if (selectingFiles) throw new Error('첨부 파일을 읽고 있어요. 잠시 기다려 주세요.');
     if (typeof id !== 'string' || !/^[\w-]{1,80}$/.test(id)) throw new Error('잘못된 요청입니다.');
-    const messages = validateMessages(input), apiKey = store.key();
+    const turn=validateTurn(input),apiKey=store.key();
     if (!apiKey) throw new Error('설정에서 Claude API 키를 먼저 입력해 주세요.');
-    const Anthropic = require('@anthropic-ai/sdk');
+    attachmentStore.get(turn.attachmentIds);
     const controller = new AbortController(); activeRequest = { controller, id };
     let timedOut = false;
-    const timeout = setTimeout(() => { timedOut = true; controller.abort(); }, 90000);
+    const timeout = setTimeout(() => { timedOut = true; controller.abort(); }, turn.search||turn.attachmentIds.length?180000:90000);
     let text = '';
     petState({ thinking: true });
     try {
-      const client = new Anthropic({ apiKey, maxRetries: 1, timeout: 60000 });
-      const stream = await client.messages.create({ model: settings.model, max_tokens: 2048, stream: true, system: SYSTEM_PROMPT + (settings.nickname ? `\n사용자 호칭: ${settings.nickname}` : '') + (settings.systemPrompt ? `\n추가 요청: ${settings.systemPrompt}` : ''), messages }, { signal: controller.signal });
-      for await (const event of stream) {
-        if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') { text += event.delta.text; emit(chat, 'chat:event', { type: 'delta', id, text: event.delta.text }); }
-        if (event.type === 'message_delta' && event.delta.stop_reason === 'max_tokens') emit(chat, 'chat:event', { type: 'notice', id, text: '답변 길이 한도에 도달했어요. 이어서 설명해 달라고 해 주세요.' });
-      }
-      emit(chat, 'chat:event', { type: 'done', id, text });
+      const client = makeChatClient(apiKey);
+      const result=await conversation.send(turn,{client,model:settings.model,system:SYSTEM_PROMPT + (settings.nickname ? `\n사용자 호칭: ${settings.nickname}` : '') + (settings.systemPrompt ? `\n추가 요청: ${settings.systemPrompt}` : ''),signal:controller.signal,emit:event=>{if(event.type==='delta')text+=event.text;emit(chat,'chat:event',{...event,id});}});
+      emit(chat, 'chat:event', { type: 'done', id, ...result });
       return { ok: true };
     } catch (error) {
-      const message = chatError(error, { cancelled:controller.signal.aborted, timedOut });
+      const message = error instanceof ConversationError ? error.message : chatError(error, { cancelled:controller.signal.aborted, timedOut });
       emit(chat, 'chat:event', { type: 'error', id, text, message }); return { error: message };
     } finally { clearTimeout(timeout); activeRequest = null; petState({ thinking: false }); }
   });
@@ -289,7 +307,7 @@ else {
     updates = createUpdateController({
       updater: mode === 'installed' ? require('electron-updater').autoUpdater : null,
       mode, version:app.getVersion(), notify:state=>broadcast('update:state',state),
-      isBusy:()=>!!(activeRequest || voiceProcess || speechProcess || cloudSpeech)
+      isBusy:()=>!!(activeRequest || voiceProcess || speechProcess || cloudSpeech || selectingFiles)
     });
     registerIpc();
     await Promise.all([pet.loadURL('park://app/pet.html'), chat.loadURL('park://app/chat.html')]);
@@ -365,7 +383,7 @@ else {
         await chat.webContents.executeJavaScript("document.querySelector('#back-chat').click()");
         const keyState = await chat.webContents.executeJavaScript('window.park.settings()');
         if (chatTest !== true || !keyState.model) throw new Error('Chat bridge check failed');
-        const missingKey = await chat.webContents.executeJavaScript('window.park.send("smoke-no-key", [{role:"user",content:"test"}])');
+        const missingKey = await chat.webContents.executeJavaScript('window.park.send("smoke-no-key", {text:"test"})');
         if (!missingKey.error?.includes('API 키')) throw new Error('Missing API key guard failed');
         const secureKey = 'sk-ant-smoke-test-key-123456789';
         const secured = await store.save({apiKey:secureKey});
@@ -374,6 +392,51 @@ else {
         const reopened = await createStore(app.getPath('userData'),safeStorage);
         if (reopened.key() !== secureKey || reopened.elevenLabsKey() !== 'sk-test-restart-key-123456789') throw new Error('Credentials did not survive an actual async decrypt/reopen');
         await store.save({clearElevenLabsKey:true});
+        const XLSX=require('xlsx'),book=XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(book,XLSX.utils.aoa_to_sheet([['항목','금액'],['재료비',120],['교통비',80],['합계',200]]),'예산');
+        const sampleFile=path.join(dir,'smoke-budget.xlsx');fs.writeFileSync(sampleFile,XLSX.write(book,{type:'buffer',bookType:'xlsx'}));
+        const realChoose=chooseFiles,realFactory=makeChatClient,priorSpeak=settings.speak;
+        let fakeTurn=0,followupPreserved=false;
+        try{
+          chooseFiles=async()=>({canceled:false,filePaths:[sampleFile]});
+          makeChatClient=()=>({messages:{stream:params=>{
+            const stream=new(require('node:events').EventEmitter)();
+            stream.finalMessage=async()=>{
+              await delay(50);fakeTurn++;
+              if(fakeTurn===2)followupPreserved=JSON.stringify(params.messages).includes('smoke-search-context')&&JSON.stringify(params.messages).includes('smoke-budget.xlsx');
+              const citations=[{type:'char_location',document_index:0,document_title:'smoke-budget.xlsx'}];
+              const content=[];
+              if(params.tools){
+                content.push({type:'server_tool_use',id:'smoke-tool',name:'web_search',input:{query:'Electron official'}},{type:'web_search_tool_result',tool_use_id:'smoke-tool',content:[{type:'web_search_result',url:'https://www.electronjs.org/',title:'Electron',encrypted_content:'smoke-search-context'}]});
+                citations.push({type:'web_search_result_location',url:'https://www.electronjs.org/',title:'Electron 공식 문서',encrypted_index:'smoke-index'});
+              }
+              const answer=fakeTurn===1?'첨부한 예산의 합계는 200입니다. 공식 사이트도 확인했어요.':'교통비는 80입니다.';
+              content.push({type:'text',text:answer,citations});
+              for(const block of content){stream.emit('streamEvent',{type:'content_block_start',content_block:block});if(block.type==='text'){stream.emit('text',block.text);for(const citation of citations)stream.emit('citation',citation);}}
+              return {content,stop_reason:'end_turn'};
+            };return stream;
+          }}});
+          settings=await store.save({speak:false});settings=currentSettings();broadcast('settings:changed',settings);
+          const researchUI=await chat.webContents.executeJavaScript(`(async()=>{
+            const wait=async fn=>{for(let i=0;i<400;i++){if(fn())return;await new Promise(r=>setTimeout(r,50));}throw new Error('Attachment/search UI timed out: '+document.querySelector('#notice').textContent);};
+            document.querySelector('#attach-file').click();await wait(()=>document.querySelectorAll('.attachment-chip').length===1);
+            document.querySelector('.attachment-chip button').click();await wait(()=>document.querySelectorAll('.attachment-chip').length===0);
+            document.querySelector('#attach-file').click();await wait(()=>document.querySelectorAll('.attachment-chip').length===1);
+            document.querySelector('#toggle-search').click();
+            document.querySelector('#message').value='첨부 예산을 분석하고 웹에서 출처를 확인해 주세요.';document.querySelector('#composer').requestSubmit();
+            await wait(()=>document.querySelector('.answer-source')&&document.querySelector('#send').getAttribute('aria-label')==='메시지 보내기');
+            if(document.querySelectorAll('.answer-source').length!==2||!document.querySelector('.message.assistant .bubble').textContent.includes('200'))throw new Error('Sources or analysis answer missing');
+            return true;
+          })()`);
+          await flushInput();fs.writeFileSync(path.join(dir,'research.png'),(await chat.webContents.capturePage()).toPNG());
+          await chat.webContents.executeJavaScript(`(async()=>{
+            document.querySelector('#toggle-search').click();document.querySelector('#message').value='그 파일의 교통비는 얼마인가요?';document.querySelector('#composer').requestSubmit();
+            for(let i=0;i<200;i++){await new Promise(r=>setTimeout(r,50));if(document.querySelectorAll('.message.assistant').length===2&&document.querySelector('#send').getAttribute('aria-label')==='메시지 보내기')return true;}throw new Error('Attachment follow-up failed');
+          })()`);
+          if(!researchUI||!followupPreserved)throw new Error('Search or attachment multi-turn context was lost');
+          await chat.webContents.executeJavaScript(`(async()=>{document.querySelector('#new-chat').click();for(let i=0;i<100;i++){await new Promise(r=>setTimeout(r,50));if(!document.querySelector('.message'))return true;}throw new Error('New chat did not clear history');})()`);
+          if(conversation.inspect().turns!==0)throw new Error('Main conversation did not reset');
+        }finally{chooseFiles=realChoose;makeChatClient=realFactory;conversation.reset();settings=await store.save({speak:priorSpeak});settings=currentSettings();broadcast('settings:changed',settings);}
         await store.save({clearKey:true});
         const paused = pet.getBounds().x;
         await new Promise(resolve => setTimeout(resolve, 250));
@@ -416,7 +479,7 @@ else {
           fs.writeFileSync(path.join(dir,'voice-settings.png'),(await chat.webContents.capturePage()).toPNG());
           await store.save({clearElevenLabsKey:true});
         }
-        const result={...state,chatTest,nativeClick:true,repeatClick:true,dragDoesNotChat:true,nativeHitRecovery:true,essentialGait:true,reducedMotion:walkState.reduced,roaming:true,hoverPause:true,chatPause:true,encryptedKey:true,keyReopen:true,missingKeyGuard:true,speechHelper:true,voicePlayback,capabilities,model:keyState.model,pet:pet.getBounds(),chat:chat.getBounds()};
+        const result={...state,chatTest,nativeClick:true,repeatClick:true,dragDoesNotChat:true,nativeHitRecovery:true,essentialGait:true,reducedMotion:walkState.reduced,roaming:true,hoverPause:true,chatPause:true,encryptedKey:true,keyReopen:true,attachments:true,officeWorker:true,searchUI:true,sourceLinks:true,followupContext:true,newChatReset:true,missingKeyGuard:true,speechHelper:true,voicePlayback,capabilities,model:keyState.model,pet:pet.getBounds(),chat:chat.getBounds()};
         fs.writeFileSync(path.join(dir,'result.json'),JSON.stringify(result,null,2));
         console.log('SMOKE PASS', JSON.stringify(result));
         app.exit(0);

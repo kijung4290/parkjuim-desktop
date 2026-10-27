@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ko"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self' blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'"><title>박주임과 대화</title><link rel="stylesheet" href="chat.css"><link rel="stylesheet" href="voice.css"></head>
+<html lang="ko"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self' blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'"><title>박주임과 대화</title><link rel="stylesheet" href="chat.css"><link rel="stylesheet" href="voice.css"><link rel="stylesheet" href="attachments.css"></head>
 <body><link rel="stylesheet" href="updates.css">
 <svg class="icon-definitions" xmlns="http://www.w3.org/2000/svg"><defs>
 <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6"/></symbol>
@@ -11,6 +11,8 @@
 <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
 <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></symbol>
 <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+<symbol id="i-attach" viewBox="0 0 24 24"><path d="m8 13 7-7a3 3 0 0 1 4 4l-9 9a5 5 0 0 1-7-7l9-9m-6 12 9-9"/></symbol>
+<symbol id="i-web" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><ellipse cx="12" cy="12" rx="4" ry="9"/><path d="M3 12h18"/></symbol>
 </defs></svg>
 <main class="window">
   <header class="topbar">
@@ -25,7 +27,10 @@
   <div id="notice" class="notice" role="status" hidden></div>
   <button id="stop-speech" class="speech-stop" type="button" hidden>음성 준비 중 · 그만 읽기</button>
   <div id="connection-tip" class="connection-tip" hidden><span class="key-dot"></span>처음이라면, Claude API 키를 연결해 주세요.<button id="connect-key">연결하기 ↗</button></div>
-  <form id="composer" class="composer"><div class="input-row"><textarea id="message" aria-label="박주임에게 할 말" placeholder="박주임, 있잖아요…" rows="1" maxlength="12000"></textarea><button type="submit" class="send-button" id="send" title="보내기" aria-label="메시지 보내기"><svg><use href="#i-send"/></svg></button></div><div class="composer-bottom"><button type="button" id="microphone" class="voice-button" aria-label="음성 입력 시작" aria-pressed="false"><svg><use href="#i-mic"/></svg><span id="mic-label">말로 입력</span></button><button type="button" id="toggle-speech" class="voice-button" aria-label="답변 읽기 켜기 또는 끄기" aria-pressed="true"><svg><use href="#i-sound"/></svg><span>답변 읽기</span></button><span class="input-hint">Enter로 보내기</span></div></form>
+  <form id="composer" class="composer">
+    <div class="composer-tools"><button id="attach-file" class="composer-tool" type="button" title="PDF·이미지·텍스트·Word·Excel 첨부"><svg><use href="#i-attach"/></svg>파일 첨부</button><button id="toggle-search" class="composer-tool" type="button" aria-pressed="false" title="웹 검색을 켜면 필요할 때 검색해요. 추가 API 검색 사용료가 발생할 수 있어요."><svg><use href="#i-web"/></svg>웹 검색</button><span id="attachment-count" class="attachment-count">파일당 최대 6MB</span></div>
+    <div id="attachment-list" class="attachment-list" aria-label="보낼 첨부 파일" hidden></div><p id="attachment-note" class="attachment-note" hidden>보내면 파일 내용이 Claude로 전송돼요. Word·Excel은 텍스트·표 값을 읽어요.</p>
+    <div class="input-row"><textarea id="message" aria-label="박주임에게 할 말" placeholder="박주임, 있잖아요…" rows="1" maxlength="12000"></textarea><button type="submit" class="send-button" id="send" title="보내기" aria-label="메시지 보내기"><svg><use href="#i-send"/></svg></button></div><div class="composer-bottom"><button type="button" id="microphone" class="voice-button" aria-label="음성 입력 시작" aria-pressed="false"><svg><use href="#i-mic"/></svg><span id="mic-label">말로 입력</span></button><button type="button" id="toggle-speech" class="voice-button" aria-label="답변 읽기 켜기 또는 끄기" aria-pressed="true"><svg><use href="#i-sound"/></svg><span>답변 읽기</span></button><span class="input-hint">Enter로 보내기</span></div></form>
   <footer class="footnote">Claude와 함께하는 박주임 · 대화는 이 실행 중에만 기억해요</footer>
   <section id="settings-panel" class="settings-panel" aria-label="박주임 설정" hidden>
     <header class="settings-header"><button class="icon-button" id="back-chat" aria-label="대화로 돌아가기"><svg><use href="#i-back"/></svg></button><h2>박주임 설정</h2><span>나에게 맞게, 조금씩.</span></header>
