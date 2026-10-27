@@ -1,6 +1,6 @@
 {
   "name": "parkjuim-desktop",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "description": "바탕화면을 산책하는 3D 박주임 · Claude·Gemini·GPT AI 컴패니언",
   "author": "박주임",
   "private": true,
@@ -49,7 +49,17 @@
     "appId": "kr.parkjuim.desktop",
     "productName": "박주임 미니미",
     "asar": true,
-    "extraResources": [{"from":"node_modules/three/examples/jsm","to":"three-addons","filter":["loaders/GLTFLoader.js","utils/BufferGeometryUtils.js","utils/SkeletonUtils.js"]}],
+    "extraResources": [
+      {
+        "from": "node_modules/three/examples/jsm",
+        "to": "three-addons",
+        "filter": [
+          "loaders/GLTFLoader.js",
+          "utils/BufferGeometryUtils.js",
+          "utils/SkeletonUtils.js"
+        ]
+      }
+    ],
     "electronDist": "node_modules/electron/dist",
     "publish": [
       {
