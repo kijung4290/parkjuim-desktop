@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ko"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self' blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'"><title>박주임과 대화</title><link rel="stylesheet" href="chat.css"><link rel="stylesheet" href="voice.css"><link rel="stylesheet" href="attachments.css"></head>
+<html lang="ko"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self' blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'"><title>박주임과 대화</title><link rel="stylesheet" href="chat.css"><link rel="stylesheet" href="voice.css"><link rel="stylesheet" href="attachments.css"><link rel="stylesheet" href="history.css"></head>
 <body><link rel="stylesheet" href="updates.css">
 <svg class="icon-definitions" xmlns="http://www.w3.org/2000/svg"><defs>
 <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6"/></symbol>
@@ -10,6 +10,7 @@
 <symbol id="i-sound" viewBox="0 0 24 24"><path d="m11 4-6 5H2v6h3l6 5zM15 8a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14"/></symbol>
 <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
 <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></symbol>
+<symbol id="i-history" viewBox="0 0 24 24"><path d="M8 6h12M8 12h12M8 18h12"/><circle cx="3" cy="6" r=".6"/><circle cx="3" cy="12" r=".6"/><circle cx="3" cy="18" r=".6"/></symbol>
 <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
 <symbol id="i-attach" viewBox="0 0 24 24"><path d="m8 13 7-7a3 3 0 0 1 4 4l-9 9a5 5 0 0 1-7-7l9-9m-6 12 9-9"/></symbol>
 <symbol id="i-web" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><ellipse cx="12" cy="12" rx="4" ry="9"/><path d="M3 12h18"/></symbol>
@@ -17,7 +18,7 @@
 <main class="window">
   <header class="topbar">
     <div class="identity"><div class="avatar"><img src="reference.png" alt=""><i></i></div><div><strong>박주임<span class="tag">미니미</span></strong><span class="presence" id="presence">곁에 있어요</span></div></div>
-    <nav class="window-actions" aria-label="대화 메뉴"><button class="icon-button" id="new-chat" title="새 대화" aria-label="새 대화"><svg><use href="#i-plus"/></svg></button><button class="icon-button" id="open-settings" title="설정" aria-label="설정 열기"><svg><use href="#i-settings"/></svg></button><button class="icon-button" id="close-chat" title="접어 두기" aria-label="대화창 닫기"><svg><use href="#i-close"/></svg></button></nav>
+    <nav class="window-actions" aria-label="대화 메뉴"><button class="icon-button" id="open-history" title="대화 목록" aria-label="대화 목록 열기"><svg><use href="#i-history"/></svg></button><button class="icon-button" id="new-chat" title="새 대화" aria-label="새 대화"><svg><use href="#i-plus"/></svg></button><button class="icon-button" id="open-settings" title="설정" aria-label="설정 열기"><svg><use href="#i-settings"/></svg></button><button class="icon-button" id="close-chat" title="접어 두기" aria-label="대화창 닫기"><svg><use href="#i-close"/></svg></button></nav>
   </header>
   <section id="conversation" class="conversation" aria-label="대화 내용" tabindex="0">
     <div id="welcome" class="welcome"><div class="welcome-illustration"><span class="orbit orbit-one"></span><span class="orbit orbit-two"></span><img src="reference.png" alt="카키색 니트를 입은 박주임"><span class="little-note">잠깐, 쉬어 가요.</span></div><p class="eyebrow">당신의 작은 바탕화면 동료</p><h1>불렀어요?<br>무엇부터 같이 할까요.</h1><p class="welcome-copy">정리 안 된 생각도, 소소한 이야기도 좋아요.</p><div class="suggestions"><button data-prompt="오늘 할 일이 많아서 막막해요. 같이 우선순위를 정리해 주세요."><span>↗</span>할 일 정리</button><button data-prompt="제가 쓴 글을 자연스럽게 다듬는 걸 도와주세요."><span>✎</span>글 다듬기</button><button data-prompt="잠깐 쉬면서 이야기 나누고 싶어요."><span>☁</span>잠깐 수다</button></div></div>
@@ -32,6 +33,13 @@
     <div id="attachment-list" class="attachment-list" aria-label="보낼 첨부 파일" hidden></div><p id="attachment-note" class="attachment-note" hidden>보내면 파일 내용이 선택한 AI로 전송돼요. Word·Excel은 텍스트·표 값을 읽어요.</p>
     <div class="input-row"><textarea id="message" aria-label="박주임에게 할 말" placeholder="박주임, 있잖아요…" rows="1" maxlength="12000"></textarea><button type="submit" class="send-button" id="send" title="보내기" aria-label="메시지 보내기"><svg><use href="#i-send"/></svg></button></div><div class="composer-bottom"><button type="button" id="microphone" class="voice-button" aria-label="음성 입력 시작" aria-pressed="false"><svg><use href="#i-mic"/></svg><span id="mic-label">말로 입력</span></button><button type="button" id="toggle-speech" class="voice-button" aria-label="답변 읽기 켜기 또는 끄기" aria-pressed="true"><svg><use href="#i-sound"/></svg><span>답변 읽기</span></button><span class="input-hint">Enter로 보내기</span></div></form>
   <footer class="footnote">Claude와 함께하는 박주임 · 대화는 이 실행 중에만 기억해요</footer>
+  <section id="history-panel" class="history-panel" aria-label="대화 목록" hidden>
+    <header class="history-header"><button id="close-history" class="icon-button" type="button" aria-label="대화로 돌아가기"><svg><use href="#i-back"/></svg></button><h2>대화 목록</h2><small id="history-count">0/50</small></header>
+    <label class="history-search"><input id="history-search" type="search" placeholder="대화 이름이나 AI 서비스로 찾기" aria-label="대화 목록 검색" maxlength="100"></label>
+    <p class="history-caption">대화 텍스트를 이 PC에 암호화해 저장해요.<br>첨부 파일의 원본은 보관하지 않아요.</p>
+    <p id="history-empty" class="history-empty">박주임과 나눈 대화가 여기에 모여요.</p><div id="history-list" class="history-list" aria-label="저장된 대화"></div>
+    <div class="history-footer"><p id="history-feedback" class="settings-feedback" role="status"></p><button id="history-new" class="save-button" type="button"><svg><use href="#i-plus"/></svg>새 대화 시작</button></div>
+  </section>
   <section id="settings-panel" class="settings-panel" aria-label="박주임 설정" hidden>
     <header class="settings-header"><button class="icon-button" id="back-chat" aria-label="대화로 돌아가기"><svg><use href="#i-back"/></svg></button><h2>박주임 설정</h2><span>나에게 맞게, 조금씩.</span></header>
     <form id="settings-form" class="settings-form">

@@ -95,6 +95,11 @@ function createConversation({attachments}){
       }
     }finally{active=false;}
   }
-  return {send,reset:()=>{if(active)throw new ConversationError('답변을 중지한 뒤 새 대화를 시작해 주세요.');turns=[];carriedFiles=[];links.clear();attachments.clear();},source:id=>links.get(id),inspect:()=>({turns:turns.length,active})};
+  const reset=()=>{if(active)throw new ConversationError('답변을 중지한 뒤 새 대화를 시작해 주세요.');turns=[];carriedFiles=[];links.clear();attachments.clear();};
+  function restore(saved){
+    const restored=saved.slice(-12).map(turn=>{validateTurn({text:turn.user});if(typeof turn.assistant!=='string'||!turn.assistant.trim())throw new ConversationError('저장된 대화를 확인해 주세요.');return {messages:[{role:'user',content:turn.user},{role:'assistant',content:turn.assistant}]};});
+    reset();turns=restored;
+  }
+  return {send,reset,restore,source:id=>links.get(id),inspect:()=>({turns:turns.length,active})};
 }
 module.exports={createConversation,validateTurn,webUrl,ConversationError};

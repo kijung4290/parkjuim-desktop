@@ -42,6 +42,12 @@ function userInput(blocks,text,provider){
   const content=[...fileParts(blocks,provider),{type:provider==='openai'?'input_text':'text',text}];
   return provider==='openai'?{role:'user',content}:{type:'user_input',content};
 }
+function parseGrounding(html){
+  if(typeof html!=='string'||Buffer.byteLength(html)>200000)return null;
+  const urls=new Set();
+  const parser=new Parser({onopentag(name,attrs){if(name==='a'){const url=webUrl(attrs.href);if(url)urls.add(url);}}},{decodeEntities:true});parser.end(html);
+  return {html,urls};
+}
 // Each provider retains its native response items (including opaque reasoning
 // signatures) in main-process memory. Changing providers resets this context.
 function createAIConversation({attachments}){
@@ -49,10 +55,8 @@ function createAIConversation({attachments}){
   let provider=null,turns=[],carried=[],active=false;
   const links=new Map(),groundings=new Map();
   function addGrounding(html){
-    if(typeof html!=='string'||Buffer.byteLength(html)>200000)return null;
-    const id=randomUUID(),urls=new Set();
-    const parser=new Parser({onopentag(name,attrs){if(name==='a'){const url=webUrl(attrs.href);if(url)urls.add(url);}}},{decodeEntities:true});parser.end(html);
-    groundings.set(id,{html,urls});while(groundings.size>36)groundings.delete(groundings.keys().next().value);
+    const document=parseGrounding(html);if(!document)return null;
+    const id=randomUUID();groundings.set(id,document);while(groundings.size>36)groundings.delete(groundings.keys().next().value);
     return id;
   }
   async function send(input,options){
@@ -119,6 +123,14 @@ function createAIConversation({attachments}){
       return {text,sources,searches,suggestions};
     }finally{active=false;}
   }
-  return {send,reset(){if(active)throw new ConversationError('답변을 중지한 뒤 새 대화를 시작해 주세요.');claude.reset();provider=null;turns=[];carried=[];links.clear();groundings.clear();},source:id=>links.get(id)||claude.source(id),inspect:()=>provider==='claude'?claude.inspect():({turns:turns.length,active}),grounding:id=>groundings.get(id)?.html,suggestionLink:url=>{const safe=webUrl(url);return !!safe&&[...groundings.values()].some(item=>item.urls.has(safe));}};
+  function reset(){if(active)throw new ConversationError('답변을 중지한 뒤 새 대화를 시작해 주세요.');claude.reset();provider=null;turns=[];carried=[];links.clear();groundings.clear();}
+  function restore(record){
+    providerInfo(record.provider);
+    const saved=record.turns.slice(-12);for(const turn of saved){validateTurn({text:turn.user});if(typeof turn.assistant!=='string'||!turn.assistant.trim())throw new ConversationError('저장된 대화를 확인해 주세요.');}
+    reset();provider=record.provider;
+    if(provider==='claude')claude.restore(saved);
+    else turns=saved.map(turn=>({blocks:[],native:[userInput([],turn.user,provider),provider==='openai'?{role:'assistant',content:turn.assistant}:{type:'model_output',content:[{type:'text',text:turn.assistant}]}]}));
+  }
+  return {send,reset,restore,source:id=>links.get(id)||claude.source(id),inspect:()=>provider==='claude'?claude.inspect():({turns:turns.length,active}),grounding:id=>groundings.get(id)?.html,suggestionLink:url=>{const safe=webUrl(url);return !!safe&&[...groundings.values()].some(item=>item.urls.has(safe));}};
 }
-module.exports={createClient,listModels,createAIConversation,fileParts};
+module.exports={createClient,listModels,createAIConversation,fileParts,parseGrounding};
