@@ -17,3 +17,21 @@ test('imported models copy into the profile and survive reopen; deletion never m
     await assert.rejects(store.read('../../settings'));const image=path.join(root,'image.png');fs.writeFileSync(image,bytes);await assert.rejects(store.add(image),/GLB/);assert.equal(store.list().length,0);
   }finally{fs.rmSync(root,{recursive:true,force:true});}
 });
+test('selected and dropped file bytes use the same GLB checks and persist without trusting a supplied path',async()=>{
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'park-model-bytes-'));
+  try{
+    let store=await createModelStore(root);const bytes=modelFixture();
+    const model=await store.addBytes({name:'내 캐릭터.GLB',bytes:new Uint8Array(bytes),path:'C:/never-read-this.glb'});
+    assert.equal(model.name,'내 캐릭터');assert.deepEqual(await store.read(model.id),bytes);
+    store=await createModelStore(root);assert.equal(store.has(model.id),true);assert.deepEqual(store.info(model.id).animations,['Idle']);
+    for(const input of [{name:'a.png',bytes},{name:'a.glb',bytes:[...bytes]},{name:'a.glb',bytes:new Uint8Array(20*1024*1024+1)},{name:'a.glb',bytes:new Uint8Array(30)},{name:'a\0.glb',bytes}])await assert.rejects(store.addBytes(input));
+    assert.equal(store.list().length,1);await store.remove(model.id);assert.equal(store.list().length,0);
+  }finally{fs.rmSync(root,{recursive:true,force:true});}
+});
+test('file input and drops enforce GLB extension and size before reading or sending file data',async()=>{
+  const {readModelFile,MAX_MODEL_BYTES}=await import('../renderer/model-file.mjs');let read=0;
+  const file={name:'robot.GLB',size:30,arrayBuffer:async()=>{read++;return new ArrayBuffer(30);}};
+  const input=await readModelFile(file);assert.equal(input.bytes.length,30);assert.equal(read,1);
+  for(const invalid of [{...file,name:'image.png'},{...file,size:MAX_MODEL_BYTES+1},{...file,size:0}])await assert.rejects(readModelFile(invalid));
+  assert.equal(read,1);await assert.rejects(readModelFile({...file,size:40}),/끝까지/);
+});

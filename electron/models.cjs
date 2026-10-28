@@ -52,6 +52,11 @@ async function createModelStore(directory){
   const file=(id,extension=records.find(record=>record.id===id)?.extension||'glb')=>{if(typeof id!=='string'||!MODEL_ID.test(id)||!['glb','png','jpg'].includes(extension))throw new Error('캐릭터 ID를 확인해 주세요.');return path.join(root,`${id}.${extension}`);};
   const write=async next=>{await fs.writeFile(`${indexFile}.tmp`,JSON.stringify(next),{mode:0o600});await fs.rename(`${indexFile}.tmp`,indexFile);records=next;};
   function mutate(action){const operation=queue.then(action);queue=operation.catch(()=>{});return operation;}
+  async function persist(name,bytes){
+    if(records.length>=20)throw new Error('추가 캐릭터는 20개까지 보관해요. 필요 없는 캐릭터를 삭제해 주세요.');
+    const details=inspectGLB(bytes),id=randomUUID(),record={id,name:path.basename(name,path.extname(name)).slice(0,100),size:bytes.length,kind:'model',extension:'glb',contentType:'model/gltf-binary',...details};
+    await fs.writeFile(file(id,'glb'),bytes,{flag:'wx',mode:0o600});try{await write([...records,record]);}catch(error){await fs.unlink(file(id,'glb'));throw error;}return structuredClone(record);
+  }
   return {
     list:()=>structuredClone(records),
     has:id=>records.some(record=>record.id===id),
@@ -63,11 +68,12 @@ async function createModelStore(directory){
       if(ext!=='.glb')throw new Error('GLB 모델 파일을 선택해 주세요.');
       const handle=await fs.open(source,'r');let bytes;
       try{const stat=await handle.stat(),limit=ext==='.glb'?MAX_BYTES:6*1024*1024;if(!stat.isFile()||stat.size>limit||stat.size<20)throw new Error('이미지는 6MB, GLB 모델은 20MB 이하로 선택해 주세요.');bytes=Buffer.alloc(stat.size);let offset=0;while(offset<bytes.length){const result=await handle.read(bytes,offset,bytes.length-offset,offset);if(!result.bytesRead)break;offset+=result.bytesRead;}const after=await handle.stat();if(offset!==bytes.length||after.size!==stat.size||after.mtimeMs!==stat.mtimeMs)throw new Error('파일이 바뀌었어요. 다시 선택해 주세요.');}finally{await handle.close();}
-      const kind='model',extension='glb',contentType='model/gltf-binary';
-      const details=inspectGLB(bytes);
-      const id=randomUUID(),record={id,name:path.basename(source,path.extname(source)).slice(0,100),size:bytes.length,kind,extension,contentType,...details};
-      await fs.writeFile(file(id,extension),bytes,{flag:'wx',mode:0o600});try{await write([...records,record]);}catch(error){await fs.unlink(file(id,extension));throw error;}return structuredClone(record);
+      return persist(path.basename(source),bytes);
     }),
+    addBytes:async input=>{
+      if(!input||typeof input.name!=='string'||input.name.length>300||/[\x00-\x1f]/.test(input.name)||path.extname(input.name).toLowerCase()!=='.glb'||!(input.bytes instanceof Uint8Array)||input.bytes.byteLength<20||input.bytes.byteLength>MAX_BYTES)throw new Error('20MB 이하의 GLB 파일 한 개를 선택해 주세요.');
+      const bytes=Buffer.from(input.bytes);return mutate(()=>persist(input.name,bytes));
+    },
     remove:id=>mutate(async()=>{if(!records.some(record=>record.id===id))throw new Error('캐릭터를 찾지 못했어요.');const target=file(id);await write(records.filter(record=>record.id!==id));try{await fs.unlink(target);}catch(error){if(error.code!=='ENOENT')throw error;}return {ok:true};})
   };
 }

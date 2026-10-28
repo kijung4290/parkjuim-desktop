@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('park', Object.freeze({
   modelError: () => ipcRenderer.send('pet:model-error'),
   customModels: () => ipcRenderer.invoke('models:list'),
   importModel: () => ipcRenderer.invoke('models:add'),
+  importModelData: input => ipcRenderer.invoke('models:import',input),
   deleteModel: id => ipcRenderer.invoke('models:delete',id),
   saveSettings: input => ipcRenderer.invoke('settings:save', input),
   aiModels: input => ipcRenderer.invoke('ai:models', input),

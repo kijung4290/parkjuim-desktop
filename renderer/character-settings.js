@@ -1,6 +1,7 @@
 import * as THREE from '/vendor/three.module.js';
 import {createCompanion} from './companion.js';
 import {APPEARANCE_DEFAULTS,CHARACTER_PRESETS,sanitizeAppearance} from './appearance.mjs';
+import {readModelFile} from './model-file.mjs';
 const $=selector=>document.querySelector(selector);
 const controls={characterName:'character-name',characterType:'character-type',hairStyle:'character-hair',skinColor:'character-skin',hairColor:'character-fur',outfitColor:'character-outfit',pantsColor:'character-pants',glasses:'character-glasses',customModelId:'custom-character',modelRotation:'character-rotation'};
 export function createCharacterSettings(bridge){
@@ -11,7 +12,18 @@ export function createCharacterSettings(bridge){
   function modelFeedback(message){const state=character?.inspectAppearance();const model=models.find(item=>item.id===draft.customModelId);$('#character-model-feedback').textContent=message||(draft.characterType!=='custom'?'GLB 파일은 이 PC에 복사해 보관해요. 최대 20MB, 텍스처 포함·압축 해제 상태로 선택해 주세요.':!draft.customModelId?'내 GLB 캐릭터 추가를 눌러 파일을 선택해 주세요.':state?.customPhase==='error'?state.customError:state?.customReady?`${model?.name||'내 캐릭터'} · 실제 3D 모델${model?.animations.length?' · 동작: '+model.animations.slice(0,4).join(', '):' · 동작 클립 없음, 위치 이동과 시선 회전을 사용해요.'}`:'3D 모델을 불러오고 있어요…');}
   function listModels(){const select=$('#custom-character');select.replaceChildren();const empty=document.createElement('option');empty.value='';empty.textContent='추가한 GLB를 선택해 주세요';select.append(empty);for(const item of models){const option=document.createElement('option');option.value=item.id;option.textContent=item.name;select.append(option);}if(draft.customModelId&&!models.some(item=>item.id===draft.customModelId)){const option=document.createElement('option');option.value=draft.customModelId;option.textContent='저장된 캐릭터';select.append(option);}select.value=draft.customModelId;}
   async function refreshModels(){if(!bridge)return;const result=await bridge.customModels();if(result?.error)throw new Error(result.error);models=result.items;listModels();show();}
-  async function modelTask(action){if(modelBusy)return;modelBusy=true;$('#character-import').disabled=true;$('#character-delete').disabled=true;try{await action();}catch(error){modelFeedback(error.message);}finally{modelBusy=false;$('#character-import').disabled=false;$('#character-delete').disabled=false;}}
+  async function modelTask(action){
+    if(modelBusy)return;modelBusy=true;const save=$('#settings-form .save-button'),wasDisabled=save.disabled;
+    for(const id of ['character-import','character-file','character-delete'])$('#'+id).disabled=true;save.disabled=true;$('#character-drop-zone').setAttribute('aria-busy','true');
+    try{await action();}catch(error){modelFeedback(error.message);}finally{modelBusy=false;for(const id of ['character-import','character-file','character-delete'])$('#'+id).disabled=false;save.disabled=wasDisabled;$('#character-drop-zone').setAttribute('aria-busy','false');}
+  }
+  async function acceptModel(result){if(result?.error)throw new Error(result.error);if(result.canceled)return;await refreshModels();draft={...draft,characterType:'custom',customModelId:result.model.id,modelRotation:0};deleteArmed=false;fill();}
+  function importFiles(files){return modelTask(async()=>{
+    if(!bridge)throw new Error('GLB 파일 추가는 실제 앱에서 사용할 수 있어요.');
+    if(files.length!==1)throw new Error('GLB 파일은 한 개씩 추가해 주세요.');
+    modelFeedback('GLB 파일을 읽고 있어요…');const input=await readModelFile(files[0]);
+    modelFeedback('3D 모델을 확인하고 보관함에 추가하고 있어요…');await acceptModel(await bridge.importModelData(input));
+  });}
   function boot(){
     if(renderer||failed)return;
     try{
@@ -40,7 +52,20 @@ export function createCharacterSettings(bridge){
     }
   });
   $('#character-reset').addEventListener('click',()=>{draft={...APPEARANCE_DEFAULTS};fill();});
-  $('#character-import').addEventListener('click',()=>modelTask(async()=>{if(!bridge)throw new Error('GLB 파일 추가는 실제 앱에서 사용할 수 있어요.');const result=await bridge.importModel();if(result?.error)throw new Error(result.error);if(result.canceled)return;await refreshModels();draft={...draft,characterType:'custom',customModelId:result.model.id,modelRotation:0};deleteArmed=false;fill();}));
+  $('#character-import').addEventListener('click',()=>modelTask(async()=>{if(!bridge)throw new Error('GLB 파일 추가는 실제 앱에서 사용할 수 있어요.');await acceptModel(await bridge.importModel());}));
+  $('#character-file').addEventListener('click',event=>{event.currentTarget.value='';});
+  $('#character-file').addEventListener('change',event=>{const files=[...event.target.files];if(files.length)importFiles(files);});
+  const zone=$('#character-drop-zone');let dragDepth=0;
+  const hasFiles=event=>Array.from(event.dataTransfer?.types||[]).includes('Files');
+  zone.addEventListener('dragenter',event=>{if(!hasFiles(event))return;event.preventDefault();dragDepth++;zone.classList.add('drag-over');});
+  zone.addEventListener('dragleave',()=>{if(--dragDepth<=0){dragDepth=0;zone.classList.remove('drag-over');}});
+  document.addEventListener('dragover',event=>{if(hasFiles(event)){event.preventDefault();event.dataTransfer.dropEffect=modelBusy?'none':'copy';}});
+  document.addEventListener('drop',event=>{
+    if(!hasFiles(event))return;event.preventDefault();dragDepth=0;zone.classList.remove('drag-over');
+    const files=[...event.dataTransfer.files];
+    if(!visible&&!files.some(file=>/\.glb$/i.test(file.name)))return;
+    if(!visible)$('#open-settings').click();importFiles(files);
+  });
   $('#character-delete').addEventListener('click',()=>{if(!deleteArmed){deleteArmed=true;show();return;}modelTask(async()=>{const name=draft.characterName,result=await bridge.deleteModel(draft.customModelId);if(result?.error)throw new Error(result.error);deleteArmed=false;draft={...saved,characterName:name,characterType:'human',customModelId:''};await refreshModels();fill();});});
   function setVisible(value){visible=value;if(visible)boot();renderer?.setAnimationLoop(visible&&!document.hidden?animate:null);}
   document.addEventListener('visibilitychange',()=>renderer?.setAnimationLoop(visible&&!document.hidden?animate:null));

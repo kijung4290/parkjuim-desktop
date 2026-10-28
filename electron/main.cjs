@@ -29,11 +29,12 @@ const historyGroundings=new Map();
 let chooseFiles=(...args)=>dialog.showOpenDialog(...args);
 let makeChatClient=createClient;
 const voiceSmoke = process.argv.includes('--voice-smoke-test');
-const smoke = process.argv.includes('--smoke-test') || voiceSmoke;
+const modelImportPreview=process.argv.includes('--model-import-preview');
+const smoke = process.argv.includes('--smoke-test') || voiceSmoke || modelImportPreview;
 // Local onboarding credentials are development-only and never bundled.
 if (!app.isPackaged && !smoke) require('dotenv').config({ path:path.join(__dirname,'../.env.local'), quiet:true });
 const smokeRoot = app.isPackaged ? path.join(path.dirname(app.getPath('exe')), '.preview') : path.join(__dirname, '../.preview');
-if (smoke) app.setPath('userData', path.join(smokeRoot, 'smoke-data'));
+if (smoke) app.setPath('userData', path.join(smokeRoot, modelImportPreview?'model-import-data':'smoke-data'));
 protocol.registerSchemesAsPrivileged([{ scheme: 'park', privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
 app.setAppUserModelId('kr.parkjuim.desktop');
 let pet, chat, tray, store, activeRequest, voiceProcess, speechProcess, settings, dragging, wanderTimer;
@@ -111,7 +112,7 @@ function showChat(view = 'chat') {
   walker.pause(Date.now()); moving = false; placeChat(); chat.show(); chat.focus();
   emit(chat, 'view:open', view); petState();
 }
-function hideChat() { voiceStop(); silence(); chat.hide(); walker.pause(Date.now(),2500); petState(); }
+function hideChat() { if(selectingFiles)return;voiceStop(); silence(); chat.hide(); walker.pause(Date.now(),2500); petState(); }
 function contextMenu() {
   settings = currentSettings();
   Menu.buildFromTemplate([
@@ -241,7 +242,15 @@ function registerIpc() {
   handle('models:add','chat',async()=>{
     if(activeRequest||selectingFiles||managingHistory)throw new Error('현재 작업을 마친 뒤 캐릭터를 추가해 주세요.');
     if(!modelStore)throw new Error(modelStoreError||'캐릭터 보관함을 사용할 수 없어요.');selectingFiles=true;
-    try{const selected=await chooseFiles(chat,{title:'내 3D 캐릭터 추가',properties:['openFile'],filters:[{name:'3D GLB 모델',extensions:['glb']}]});if(selected.canceled)return {canceled:true};return {model:await modelStore.add(selected.filePaths[0])};}finally{selectingFiles=false;}
+    // Windows native dialogs can lose foreground ownership behind floating pet
+    // windows. Lower both topmost windows for the modal dialog and restore them.
+    pet.setAlwaysOnTop(false);chat.setAlwaysOnTop(false);chat.show();chat.focus();
+    try{const selected=await chooseFiles(chat,{title:'내 3D 캐릭터 추가',buttonLabel:'캐릭터 추가',defaultPath:app.getPath('downloads'),properties:['openFile','dontAddToRecent'],filters:[{name:'3D GLB 모델',extensions:['glb']},{name:'모든 파일',extensions:['*']}]});if(selected.canceled)return {canceled:true};return {model:await modelStore.add(selected.filePaths[0])};}finally{selectingFiles=false;pet.setAlwaysOnTop(settings.alwaysOnTop,'floating');chat.setAlwaysOnTop(settings.alwaysOnTop,'floating');chat.show();chat.focus();}
+  });
+  handle('models:import','chat',async input=>{
+    if(activeRequest||selectingFiles||managingHistory)throw new Error('현재 작업을 마친 뒤 캐릭터를 추가해 주세요.');
+    if(!modelStore)throw new Error(modelStoreError||'캐릭터 보관함을 사용할 수 없어요.');
+    selectingFiles=true;try{return {model:await modelStore.addBytes(input)};}finally{selectingFiles=false;}
   });
   handle('models:delete','chat',id=>historyTask(async()=>{
     if(!modelStore)throw new Error(modelStoreError||'캐릭터 보관함을 사용할 수 없어요.');
@@ -353,6 +362,7 @@ if (!app.requestSingleInstanceLock()) app.quit();
 else {
   app.on('second-instance', () => { if (pet) { pet.show(); showChat(); } });
   app.whenReady().then(async () => {
+    if(modelImportPreview)console.log('MODEL PREVIEW: Electron ready');
     protocol.handle('park', async request => {
       const url = new URL(request.url), relative = decodeURIComponent(url.pathname);
       if(url.host==='app'&&/^\/models\/[\da-f-]{36}$/i.test(relative)){
@@ -379,10 +389,12 @@ else {
     session.defaultSession.setPermissionCheckHandler(() => false);
     const mode = smoke ? 'development' : getUpdateMode({ packaged:app.isPackaged, platform:process.platform, portable:!!process.env.PORTABLE_EXECUTABLE_FILE, executable:app.getPath('exe') });
     startup = createStartupController({ app, mode });
+    if(modelImportPreview)console.log('MODEL PREVIEW: opening isolated settings');
     store = await createStore(app.getPath('userData'), safeStorage);
     if(smoke)await store.save({...DEFAULTS,clearKey:true,clearGeminiKey:true,clearOpenAIKey:true,clearElevenLabsKey:true});
     try{historyStore=await createHistoryStore(app.getPath('userData'),safeStorage);if(smoke)await historyStore.clear();}catch(error){historyError=error.message;}
     try{modelStore=await createModelStore(app.getPath('userData'));if(smoke)for(const model of modelStore.list())await modelStore.remove(model.id);}catch(error){modelStoreError=error.message;}
+    if(modelImportPreview)console.log('MODEL PREVIEW: isolated stores ready');
     settings = currentSettings();
     elevenLabs = createElevenLabs({ key:() => store.elevenLabsKey() || environmentKey(), allowEnvironment:!smoke });
     pet = secureWindow({ ...petSize(), transparent: true, skipTaskbar: true, hasShadow: false, title: '박주임 미니미' });
@@ -398,6 +410,7 @@ else {
       isBusy:()=>!!(activeRequest || voiceProcess || speechProcess || cloudSpeech || selectingFiles || managingHistory)
     });
     registerIpc();
+    if(modelImportPreview)console.log('MODEL PREVIEW: loading windows');
     await Promise.all([pet.loadURL('park://app/pet.html'), chat.loadURL('park://app/chat.html')]);
     resetPosition(); pet.showInactive();
     const icon = nativeImage.createFromPath(path.join(__dirname, '../assets/tray.png'));
@@ -407,7 +420,8 @@ else {
     screen.on('display-metrics-changed', resetPosition); screen.on('display-removed', resetPosition);
     app.on('browser-window-blur', () => { if (dragging || pressed) releasePetPress(); });
     if (process.argv.includes('--dev')) chat.webContents.openDevTools({ mode: 'detach' });
-    if (smoke) {
+    if(modelImportPreview){showChat('settings');chat.setPosition(80,80);}
+    if (smoke&&!modelImportPreview) {
       try {
         await pet.webContents.executeJavaScript(`new Promise((resolve,reject)=>{let tries=0;const timer=setInterval(()=>{if(window.__petTestState?.().portraitReady){clearInterval(timer);resolve(true);}else if(++tries>120){clearInterval(timer);reject(new Error('3D pet did not become ready'));}},50);})`);
         await new Promise(resolve => setTimeout(resolve, 300));
@@ -513,6 +527,26 @@ else {
         const originalPicker=chooseFiles;
         try{
           chooseFiles=async()=>({canceled:false,filePaths:[originalGLB]});
+          // File inputs and HTML drops send only the chosen File's bytes. These
+          // DOM events exercise the real renderer, preload, IPC and GLB store.
+          for(const method of ['input','drop']){
+            await chat.webContents.executeJavaScript(`(async()=>{
+              document.querySelector('#open-settings').click();
+              const data=new DataTransfer(),file=new File([new Uint8Array(${JSON.stringify([...modelBytes])})],'${method}-robot.GLB',{type:'application/octet-stream'});data.items.add(file);
+              if('${method}'==='input'){const input=document.querySelector('#character-file');input.files=data.files;input.dispatchEvent(new Event('change',{bubbles:true}));}
+              else document.querySelector('#character-drop-zone').dispatchEvent(new DragEvent('drop',{dataTransfer:data,bubbles:true,cancelable:true}));
+              for(let i=0;i<300;i++){await new Promise(r=>setTimeout(r,50));if(window.__characterSettingsState().appearance?.customReady&&!document.querySelector('#character-file').disabled){
+                const all=(await window.park.customModels()).items;if(all.length!==1||all[0].name!=='${method}-robot')throw new Error('Selected file bytes not imported');
+                document.querySelector('#character-delete').click();document.querySelector('#character-delete').click();
+                for(let j=0;j<100;j++){await new Promise(r=>setTimeout(r,50));if(!(await window.park.customModels()).items.length&&!document.querySelector('#character-file').disabled)return true;}
+              }}throw new Error('${method} GLB import failed: '+document.querySelector('#character-model-feedback').textContent);
+            })()`);
+          }
+          await chat.webContents.executeJavaScript(`(async()=>{
+            const input=document.querySelector('#character-file'),data=new DataTransfer();data.items.add(new File(['not a GLB'],'image.png'));input.files=data.files;input.dispatchEvent(new Event('change',{bubbles:true}));
+            for(let i=0;i<100;i++){await new Promise(r=>setTimeout(r,50));if(document.querySelector('#character-model-feedback').textContent.includes('.glb')&&!input.disabled){if((await window.park.customModels()).items.length)throw new Error('Invalid file entered library');return true;}}
+            throw new Error('Invalid file feedback missing');
+          })()`);
           await chat.webContents.executeJavaScript(`(async()=>{
             document.querySelector('#open-settings').click();document.querySelector('#character-import').click();
             for(let i=0;i<300;i++){await new Promise(r=>setTimeout(r,50));const preview=window.__characterSettingsState();if(preview.appearance?.customReady){document.querySelector('#character-rotation').value='90';document.querySelector('#character-rotation').dispatchEvent(new Event('input'));document.querySelector('#character-preview').scrollIntoView({block:'center'});return true;}}throw new Error('GLB preview failed: '+document.querySelector('#character-model-feedback').textContent);
@@ -715,11 +749,15 @@ else {
           fs.writeFileSync(path.join(dir,'voice-settings.png'),(await chat.webContents.capturePage()).toPNG());
           await store.save({clearElevenLabsKey:true});
         }
-        const result={...state,chatTest,longReplyContinuation:true,longReplyHistory:true,customCharacter:true,glbImport:true,glbAnimation:true,glbReopen:true,glbDelete:true,customName:true,appearanceReopen:true,live3DPreview:true,dynamicPortrait:true,defaultAppearanceReset:true,nativeClick:true,repeatClick:true,dragDoesNotChat:true,nativeHitRecovery:true,essentialGait:true,reducedMotion:walkState.reduced,roaming:true,hoverPause:true,chatPause:true,encryptedKey:true,keyReopen:true,aiProviders:true,providerKeyReopen:true,providerSearchFiles:true,historyList:true,historyRename:true,historyResume:true,historyDelete:true,historyEncryptedReopen:true,googleSuggestionsSandbox:true,attachments:true,officeWorker:true,searchUI:true,sourceLinks:true,followupContext:true,newChatReset:true,missingKeyGuard:true,speechHelper:true,voicePlayback,capabilities,model:keyState.model,pet:pet.getBounds(),chat:chat.getBounds()};
+        const result={...state,chatTest,glbFileInput:true,glbDrop:true,glbInvalidFile:true,longReplyContinuation:true,longReplyHistory:true,customCharacter:true,glbImport:true,glbAnimation:true,glbReopen:true,glbDelete:true,customName:true,appearanceReopen:true,live3DPreview:true,dynamicPortrait:true,defaultAppearanceReset:true,nativeClick:true,repeatClick:true,dragDoesNotChat:true,nativeHitRecovery:true,essentialGait:true,reducedMotion:walkState.reduced,roaming:true,hoverPause:true,chatPause:true,encryptedKey:true,keyReopen:true,aiProviders:true,providerKeyReopen:true,providerSearchFiles:true,historyList:true,historyRename:true,historyResume:true,historyDelete:true,historyEncryptedReopen:true,googleSuggestionsSandbox:true,attachments:true,officeWorker:true,searchUI:true,sourceLinks:true,followupContext:true,newChatReset:true,missingKeyGuard:true,speechHelper:true,voicePlayback,capabilities,model:keyState.model,pet:pet.getBounds(),chat:chat.getBounds()};
         fs.writeFileSync(path.join(dir,'result.json'),JSON.stringify(result,null,2));
         console.log('SMOKE PASS', JSON.stringify(result));
         app.exit(0);
-      } catch (error) { console.error(error); app.exit(1); }
+      } catch (error) {
+        console.error(error);
+        try{fs.writeFileSync(path.join(smokeRoot,'smoke-failure.png'),(await chat.webContents.capturePage()).toPNG());console.error('SMOKE UI STATE',JSON.stringify(await chat.webContents.executeJavaScript(`({notice:document.querySelector('#notice').textContent,settings:!document.querySelector('#settings-panel').hidden,send:document.querySelector('#send').getAttribute('aria-label'),messages:[...document.querySelectorAll('.message .bubble')].map(item=>item.textContent.slice(0,200)),model:document.querySelector('#character-model-feedback').textContent})`)));}catch{}
+        app.exit(1);
+      }
     }
   }).catch(error => { console.error(error); app.exit(1); });
 }
