@@ -2,12 +2,13 @@ const {randomUUID}=require('node:crypto');
 const {Parser}=require('htmlparser2');
 const {createConversation,validateTurn,webUrl,ConversationError}=require('./conversation.cjs');
 const {providerInfo}=require('./providers.cjs');
+const {CONTINUE_PROMPT,CONTINUE_PROGRESS,checkContext,checkContinuation}=require('./reply.cjs');
 
 function createClient(apiKey,provider='claude'){
   providerInfo(provider);
-  if(provider==='openai')return new (require('openai'))({apiKey,maxRetries:0,timeout:150000});
+  if(provider==='openai')return new (require('openai'))({apiKey,maxRetries:0,timeout:600000});
   if(provider==='gemini')return new (require('@google/genai').GoogleGenAI)({apiKey});
-  return new (require('@anthropic-ai/sdk'))({apiKey,maxRetries:0,timeout:150000});
+  return new (require('@anthropic-ai/sdk'))({apiKey,maxRetries:0,timeout:600000});
 }
 async function listModels(provider,apiKey){
   const client=createClient(apiKey,provider),models=[];
@@ -78,47 +79,61 @@ function createAIConversation({attachments}){
       sourceUrls.add(url);const id=randomUUID();newLinks.set(id,url);
       sources.push({id,kind:'web',title:String(annotation.title||new URL(url).hostname).slice(0,180),site:new URL(url).hostname});
     }
-    let output,text='',searches=0;
+    let text='',searches=0,previousChunk='';
+    const native=[user];
     active=true;
     try{
       emit({type:'progress',message:turn.search?'웹 검색과 답변을 준비하고 있어요':files.length?'첨부 파일을 살펴보고 있어요':'답변을 준비하고 있어요'});
-      if(selected==='openai'){
-        const params={model,instructions:system,input:context,store:false,include:['reasoning.encrypted_content'],max_output_tokens:8192};
-        if(turn.search){params.tools=[{type:'web_search'}];params.max_tool_calls=3;}
-        const stream=client.responses.stream(params,{signal});
-        stream.on('response.output_text.delta',event=>{text+=event.delta;emit({type:'delta',text:event.delta});});
-        stream.on('response.web_search_call.searching',()=>emit({type:'progress',message:'웹에서 정보를 찾고 있어요'}));
-        const response=await stream.finalResponse();
-        if(response.error||response.status==='failed')throw new ConversationError('GPT가 요청을 완료하지 못했어요. 모델·파일·검색 설정을 확인해 주세요.');
-        output=response.output||[];
-        let finalText='';
-        for(const item of output){
-          if(item.type==='web_search_call')searches++;
-          if(item.type==='message')for(const part of item.content||[]){if(part.type==='output_text'){finalText+=part.text;for(const annotation of part.annotations||[])cite(annotation);}else if(part.type==='refusal')finalText+=part.refusal;}
-        }
-        if(!text&&finalText)emit({type:'delta',text:finalText});text=finalText||text;
-        if(response.status==='incomplete')emit({type:'notice',text:'답변 길이 한도에 도달했어요. 이어서 설명해 달라고 해 주세요.'});
-      }else{
-        const params={model,system_instruction:system,input:context,store:false,generation_config:{max_output_tokens:8192}};
-        if(turn.search)params.tools=[{type:'google_search'}];
-        // A completed interaction provides every native step and signature for
-        // stateless follow-ups; no server-side conversation ID is persisted.
-        const response=await client.interactions.create(params,{signal,timeout_ms:150000,retry_codes:[]});
-        if(response.status&&response.status!=='completed')throw new ConversationError('Gemini가 답변을 완료하지 못했어요. 질문을 줄이거나 모델을 바꿔 주세요.');
-        output=response.steps||[];
-        for(const step of output){
-          if(step.type==='google_search_call')searches++;
-          if(step.type==='google_search_result'){
-            if(step.is_error)emit({type:'notice',text:'Google 검색을 완료하지 못했어요. 잠시 뒤 다시 시도해 주세요.'});
-            for(const result of step.result||[]){const id=addGrounding(result.search_suggestions);if(id)suggestions.push(id);}
+      while(true){
+        if(signal?.aborted)throw new DOMException('Aborted','AbortError');
+        try{checkContext(context);}catch(error){throw new ConversationError(error.message);}
+        let output,chunk='',incomplete=false;
+        if(selected==='openai'){
+          const params={model,instructions:system,input:[...context],store:false,include:['reasoning.encrypted_content']};
+          if(turn.search){params.tools=[{type:'web_search'}];params.max_tool_calls=3;}
+          const stream=client.responses.stream(params,{signal});
+          stream.on('response.output_text.delta',event=>{chunk+=event.delta;text+=event.delta;emit({type:'delta',text:event.delta});});
+          stream.on('response.web_search_call.searching',()=>emit({type:'progress',message:'웹에서 정보를 찾고 있어요'}));
+          const response=await stream.finalResponse();
+          if(response.error||response.status==='failed')throw new ConversationError('GPT가 요청을 완료하지 못했어요. 모델·파일·검색 설정을 확인해 주세요.');
+          output=response.output||[];
+          let finalText='';
+          for(const item of output){
+            if(item.type==='web_search_call')searches++;
+            if(item.type==='message')for(const part of item.content||[]){if(part.type==='output_text'){finalText+=part.text;for(const annotation of part.annotations||[])cite(annotation);}else if(part.type==='refusal')finalText+=part.refusal;}
           }
-          if(step.type==='model_output')for(const part of step.content||[]){if(part.type==='text'){text+=part.text;for(const annotation of part.annotations||[])cite(annotation);}}
+          if(!chunk&&finalText){emit({type:'delta',text:finalText});text+=finalText;chunk=finalText;}
+          incomplete=response.status==='incomplete'&&response.incomplete_details?.reason==='max_output_tokens';
+          if(response.status==='incomplete'&&!incomplete)emit({type:'notice',text:'GPT가 답변을 끝까지 생성하지 못했어요. 받은 내용은 보존했어요.'});
+        }else{
+          const params={model,system_instruction:system,input:[...context],store:false};
+          if(turn.search)params.tools=[{type:'google_search'}];
+          // A completed interaction provides every native step and signature for
+          // stateless follow-ups; no server-side conversation ID is persisted.
+          const response=await client.interactions.create(params,{signal,timeout_ms:600000,retry_codes:[]});
+          if(response.status&& !['completed','incomplete'].includes(response.status))throw new ConversationError('Gemini가 답변을 완료하지 못했어요. 질문을 줄이거나 모델을 바꿔 주세요.');
+          incomplete=response.status==='incomplete';
+          output=response.steps||[];
+          for(const step of output){
+            if(step.type==='google_search_call')searches++;
+            if(step.type==='google_search_result'){
+              if(step.is_error)emit({type:'notice',text:'Google 검색을 완료하지 못했어요. 잠시 뒤 다시 시도해 주세요.'});
+              for(const result of step.result||[]){const id=addGrounding(result.search_suggestions);if(id)suggestions.push(id);}
+            }
+            if(step.type==='model_output')for(const part of step.content||[]){if(part.type==='text'){chunk+=part.text;for(const annotation of part.annotations||[])cite(annotation);}}
+          }
+          if(chunk){text+=chunk;emit({type:'delta',text:chunk});}
         }
-        if(text)emit({type:'delta',text});
+        if(signal?.aborted)throw new DOMException('Aborted','AbortError');
+        native.push(...output);context.push(...output);
+        if(!incomplete)break;
+        try{checkContinuation(chunk,previousChunk);}catch(error){throw new ConversationError(error.message);}
+        previousChunk=chunk;
+        const followup=userInput([],CONTINUE_PROMPT,selected);context.push(followup);native.push(followup);
+        emit({type:'progress',message:CONTINUE_PROGRESS});
       }
-      if(signal?.aborted)throw new DOMException('Aborted','AbortError');
       if(!text.trim())throw new ConversationError('답변 텍스트를 받지 못했어요. 모델과 질문을 확인해 주세요.');
-      attachments.markUsed(turn.attachmentIds);carried=carriedNext;turns=[...recent,{native:[user,...output],blocks}];
+      attachments.markUsed(turn.attachmentIds);carried=carriedNext;turns=[...recent,{native,blocks}];
       for(const [id,url]of newLinks)links.set(id,url);while(links.size>360)links.delete(links.keys().next().value);
       return {text,sources,searches,suggestions};
     }finally{active=false;}

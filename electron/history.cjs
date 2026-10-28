@@ -5,7 +5,7 @@ const {providerInfo}=require('./providers.cjs');
 const {webUrl}=require('./conversation.cjs');
 const LIMITS=Object.freeze({conversations:50,turns:200,bytes:12*1024*1024});
 function cleanTurn(input){
-  if(!input||typeof input.user!=='string'||!input.user.trim()||input.user.length>12000||typeof input.assistant!=='string'||!input.assistant.trim()||input.assistant.length>100000)throw new Error('저장할 대화 내용을 확인해 주세요.');
+  if(!input||typeof input.user!=='string'||!input.user.trim()||input.user.length>12000||typeof input.assistant!=='string'||!input.assistant.trim())throw new Error('저장할 대화 내용을 확인해 주세요.');
   const files=(Array.isArray(input.files)?input.files:[]).slice(0,4).map(file=>({name:String(file.name||'첨부 파일').slice(0,300),format:String(file.format||'FILE').slice(0,12),size:Number.isFinite(file.size)?file.size:0}));
   const sources=[];
   for(const source of (Array.isArray(input.sources)?input.sources:[]).slice(0,30)){

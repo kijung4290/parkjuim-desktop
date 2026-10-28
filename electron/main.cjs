@@ -299,12 +299,12 @@ function registerIpc() {
     const sentFiles=attachmentStore.metadata(turn.attachmentIds);
     const controller = new AbortController(); activeRequest = { controller, id };
     let timedOut = false;
-    const timeout = setTimeout(() => { timedOut = true; controller.abort(); }, turn.search||turn.attachmentIds.length?180000:90000);
+    const watchdog = require('./reply.cjs').createReplyWatchdog(() => { timedOut = true; controller.abort(); });
     let text = '';
     petState({ thinking: true });
     try {
       const client = makeChatClient(apiKey,ai.id);
-      const result=await conversation.send(turn,{client,provider:ai.id,model:ai.model,system:characterSystemPrompt(settings) + (restoredWithoutFiles ? '\n이 대화는 저장된 텍스트로 복원됐습니다. 과거 첨부 파일의 원문은 없으므로 다시 첨부한 자료만 직접 분석하세요. 원문이 필요한 질문에는 재첨부를 안내하고 추측하지 마세요.' : '') + (settings.nickname ? `\n사용자 호칭: ${settings.nickname}` : '') + (settings.systemPrompt ? `\n추가 요청: ${settings.systemPrompt}` : ''),signal:controller.signal,emit:event=>{if(event.type==='delta')text+=event.text;emit(chat,'chat:event',{...event,id});}});
+      const result=await conversation.send(turn,{client,provider:ai.id,model:ai.model,system:characterSystemPrompt(settings) + (restoredWithoutFiles ? '\n이 대화는 저장된 텍스트로 복원됐습니다. 과거 첨부 파일의 원문은 없으므로 다시 첨부한 자료만 직접 분석하세요. 원문이 필요한 질문에는 재첨부를 안내하고 추측하지 마세요.' : '') + (settings.nickname ? `\n사용자 호칭: ${settings.nickname}` : '') + (settings.systemPrompt ? `\n추가 요청: ${settings.systemPrompt}` : ''),signal:controller.signal,emit:event=>{watchdog.touch();if(event.type==='delta')text+=event.text;emit(chat,'chat:event',{...event,id});}});
       try{
         const sources=result.sources.map(source=>({...source,url:conversation.source(source.id)}));
         const suggestions=(result.suggestions||[]).map(id=>conversation.grounding(id)).filter(Boolean);
@@ -315,7 +315,7 @@ function registerIpc() {
     } catch (error) {
       const message = error instanceof ConversationError ? error.message : chatError(error, { cancelled:controller.signal.aborted, timedOut,provider:ai.id });
       emit(chat, 'chat:event', { type: 'error', id, text, message }); return { error: message };
-    } finally { clearTimeout(timeout); activeRequest = null; petState({ thinking: false }); }
+    } finally { watchdog.close(); activeRequest = null; petState({ thinking: false }); }
   });
   handle('voice:start', 'chat', () => {
     voiceStop(); silence();
@@ -580,6 +580,26 @@ else {
             for(let i=0;i<200;i++){await new Promise(r=>setTimeout(r,50));if(document.querySelectorAll('.message.assistant').length===2&&document.querySelector('#send').getAttribute('aria-label')==='메시지 보내기')return true;}throw new Error('Attachment follow-up failed');
           })()`);
           if(!researchUI||!followupPreserved)throw new Error('Search or attachment multi-turn context was lost');
+          let longCalls=0;
+          const longAnswer='긴 답변 테스트입니다.\n'.repeat(12000)+'끝까지 받았습니다.';
+          makeChatClient=()=>({messages:{stream:params=>{
+            const stream=new(require('node:events').EventEmitter)();
+            stream.finalMessage=async()=>{
+              longCalls++;await delay(30);
+              if(longCalls===2&&!JSON.stringify(params.messages).includes(require('./reply.cjs').CONTINUE_PROMPT))throw new Error('Continuation prompt missing');
+              const answer=longCalls===1?longAnswer.slice(0,70000):longAnswer.slice(70000);
+              for(let i=0;i<answer.length;i+=500)stream.emit('text',answer.slice(i,i+500));
+              return {stop_reason:longCalls===1?'max_tokens':'end_turn',content:[{type:'text',text:answer}]};
+            };return stream;
+          }}});
+          await chat.webContents.executeJavaScript(`(async()=>{
+            document.querySelector('#message').value='긴 답변을 끝까지 작성해 주세요';document.querySelector('#composer').requestSubmit();
+            for(let i=0;i<300;i++){await new Promise(r=>setTimeout(r,50));if(document.querySelectorAll('.message.assistant').length===3&&document.querySelector('#send').getAttribute('aria-label')==='메시지 보내기'){
+              const text=document.querySelectorAll('.message.assistant .bubble')[2].textContent;
+              if(text!==${JSON.stringify(longAnswer)})throw new Error('Long reply UI lost text');return true;
+            }}throw new Error('Long reply did not complete');
+          })()`);
+          if(longCalls!==2||historyStore.get(activeConversationId).turns.at(-1).assistant!==longAnswer)throw new Error('Long reply continuation or encrypted storage failed');
           await chat.webContents.executeJavaScript(`(async()=>{document.querySelector('#new-chat').click();for(let i=0;i<100;i++){await new Promise(r=>setTimeout(r,50));if(!document.querySelector('.message'))return true;}throw new Error('New chat did not clear history');})()`);
           if(conversation.inspect().turns!==0)throw new Error('Main conversation did not reset');
           for(const provider of ['gemini','openai']){
@@ -695,7 +715,7 @@ else {
           fs.writeFileSync(path.join(dir,'voice-settings.png'),(await chat.webContents.capturePage()).toPNG());
           await store.save({clearElevenLabsKey:true});
         }
-        const result={...state,chatTest,customCharacter:true,glbImport:true,glbAnimation:true,glbReopen:true,glbDelete:true,customName:true,appearanceReopen:true,live3DPreview:true,dynamicPortrait:true,defaultAppearanceReset:true,nativeClick:true,repeatClick:true,dragDoesNotChat:true,nativeHitRecovery:true,essentialGait:true,reducedMotion:walkState.reduced,roaming:true,hoverPause:true,chatPause:true,encryptedKey:true,keyReopen:true,aiProviders:true,providerKeyReopen:true,providerSearchFiles:true,historyList:true,historyRename:true,historyResume:true,historyDelete:true,historyEncryptedReopen:true,googleSuggestionsSandbox:true,attachments:true,officeWorker:true,searchUI:true,sourceLinks:true,followupContext:true,newChatReset:true,missingKeyGuard:true,speechHelper:true,voicePlayback,capabilities,model:keyState.model,pet:pet.getBounds(),chat:chat.getBounds()};
+        const result={...state,chatTest,longReplyContinuation:true,longReplyHistory:true,customCharacter:true,glbImport:true,glbAnimation:true,glbReopen:true,glbDelete:true,customName:true,appearanceReopen:true,live3DPreview:true,dynamicPortrait:true,defaultAppearanceReset:true,nativeClick:true,repeatClick:true,dragDoesNotChat:true,nativeHitRecovery:true,essentialGait:true,reducedMotion:walkState.reduced,roaming:true,hoverPause:true,chatPause:true,encryptedKey:true,keyReopen:true,aiProviders:true,providerKeyReopen:true,providerSearchFiles:true,historyList:true,historyRename:true,historyResume:true,historyDelete:true,historyEncryptedReopen:true,googleSuggestionsSandbox:true,attachments:true,officeWorker:true,searchUI:true,sourceLinks:true,followupContext:true,newChatReset:true,missingKeyGuard:true,speechHelper:true,voicePlayback,capabilities,model:keyState.model,pet:pet.getBounds(),chat:chat.getBounds()};
         fs.writeFileSync(path.join(dir,'result.json'),JSON.stringify(result,null,2));
         console.log('SMOKE PASS', JSON.stringify(result));
         app.exit(0);

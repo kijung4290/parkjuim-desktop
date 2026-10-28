@@ -7,6 +7,14 @@ const info={provider:'claude',model:'claude-sonnet-5-5'};
 const turn={user:'예산을 정리해 주세요',assistant:'총예산은 200입니다.',files:[{name:'예산.xlsx',format:'XLSX',size:100,blocks:[{secret:'original-file-bytes'}]}],sources:[{kind:'web',title:'공식 자료',site:'example.com',url:'https://example.com/budget'},{kind:'web',url:'file:///secret'},{kind:'document',title:'예산.xlsx',site:'본문'}],suggestions:['<a target="_blank" href="https://www.google.com/search?q=budget">Google 검색</a>'],search:true,signature:'never-persist-opaque-api-data'};
 function safe(){return {isAsyncEncryptionAvailable:async()=>true,encryptStringAsync:async text=>Buffer.from([...text].reverse().join('')),decryptStringAsync:async buffer=>({result:[...buffer.toString()].reverse().join(''),shouldReEncrypt:false})};}
 function temp(){return fs.mkdtempSync(path.join(os.tmpdir(),'park-history-'));}
+test('long replies beyond the previous 100,000 character limit save, reopen and restore without truncation',async()=>{
+  const dir=temp();try{
+    const assistant='가나다'.repeat(50000)+'끝',store=await createHistoryStore(dir,safe());
+    const id=await store.append(null,info,{user:'긴 답변',assistant});
+    const reopened=await createHistoryStore(dir,safe());assert.equal(reopened.get(id).turns[0].assistant,assistant);
+    const engine=createAIConversation({attachments:{get:()=>[],markUsed:()=>{},clear:()=>{}}});engine.restore(reopened.get(id));assert.equal(engine.inspect().turns,1);
+  }finally{fs.rmSync(dir,{recursive:true,force:true});}
+});
 test('encrypted transcripts reopen with Unicode, file labels and safe links; raw files and API state are excluded',async()=>{
   const dir=temp();try{
     let store=await createHistoryStore(dir,safe());const id=await store.append(null,info,turn);

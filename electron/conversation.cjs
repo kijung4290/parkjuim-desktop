@@ -1,4 +1,5 @@
 const {randomUUID}=require('node:crypto');
+const {CONTINUE_PROMPT,CONTINUE_PROGRESS,checkContext,checkContinuation}=require('./reply.cjs');
 const MAX_REQUEST=28*1024*1024;
 class ConversationError extends Error {}
 function validateTurn(input){
@@ -58,15 +59,22 @@ function createConversation({attachments}){
     active=true;
     try{
       if(files.length)emit({type:'progress',message:'첨부 파일을 살펴보고 있어요'});
-      for(let continuation=0;continuation<3;continuation++){
+      let pauses=0,previousChunk='',lengthContinuation=false;
+      while(true){
         if(signal?.aborted)throw new DOMException('Aborted','AbortError');
-        const params={model,max_tokens:turn.search||files.length?4096:2048,system,messages:context};
+        try{checkContext(context);}catch(error){throw new ConversationError(error.message);}
+        const start=text.length;
+        let firstTextBlock=true;
+        const params={model,max_tokens:8192,system,messages:context};
         if(turn.search)params.tools=[{type:'web_search_20250305',name:'web_search',max_uses:Math.max(1,3-searches)}];
         const stream=client.messages.stream(params,{signal});
         stream.on('text',append);
         stream.on('citation',cite);
         stream.on('streamEvent',event=>{
-          if(event.type==='content_block_start'&&event.content_block.type==='text'&&text&&!text.endsWith('\n'))append('\n\n');
+          if(event.type==='content_block_start'&&event.content_block.type==='text'){
+            if(text&&!text.endsWith('\n')&&!(lengthContinuation&&firstTextBlock))append('\n\n');
+            firstTextBlock=false;
+          }
           if(event.type==='content_block_start'&&event.content_block.type==='server_tool_use'&&event.content_block.name==='web_search'){
             searches++;emit({type:'progress',message:'웹에서 정보를 찾고 있어요'});
           }
@@ -76,14 +84,22 @@ function createConversation({attachments}){
           }
         });
         const message=await stream.finalMessage();
+        if(signal?.aborted)throw new DOMException('Aborted','AbortError');
         // Preserve search encrypted_content, citations and thinking signatures
         // exactly; only safe source metadata and answer text leave main.
         const assistant={role:'assistant',content:message.content};responses.push(assistant);context.push(assistant);
         if(message.stop_reason==='pause_turn'){
-          if(continuation===2||searches>=3)throw new ConversationError('검색이 길어졌어요. 질문 범위를 줄여 다시 보내 주세요.');
+          if(++pauses>=3||searches>=3)throw new ConversationError('검색이 길어졌어요. 질문 범위를 줄여 다시 보내 주세요.');
           emit({type:'progress',message:'검색 결과를 더 확인하고 있어요'});continue;
         }
-        if(message.stop_reason==='max_tokens')emit({type:'notice',text:'답변 길이 한도에 도달했어요. 이어서 설명해 달라고 해 주세요.'});
+        if(message.stop_reason==='max_tokens'){
+          const chunk=text.slice(start);
+          try{checkContinuation(chunk,previousChunk);}catch(error){throw new ConversationError(error.message);}
+          previousChunk=chunk;lengthContinuation=true;
+          const followup={role:'user',content:CONTINUE_PROMPT};context.push(followup);responses.push(followup);
+          emit({type:'progress',message:CONTINUE_PROGRESS});continue;
+        }
+        if(message.stop_reason==='model_context_window_exceeded')emit({type:'notice',text:'모델의 대화 문맥 한도에 도달했어요. 받은 답변은 보존했어요. 새 대화에서 이어갈 부분을 보내 주세요.'});
         if(message.stop_reason==='tool_use')throw new ConversationError('이 요청에 필요한 도구를 사용할 수 없어요. 질문을 바꾸어 다시 보내 주세요.');
         if(!text.trim())throw new ConversationError('답변 텍스트를 받지 못했어요. 질문을 줄여 다시 보내 주세요.');
         attachments.markUsed(turn.attachmentIds);
